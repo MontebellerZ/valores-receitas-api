@@ -9,5 +9,6 @@ public sealed class Recipe : ISoftDeletable
     public required string Category { get; set; }
     public decimal Yield { get; set; }
     public decimal HoursPerBatch { get; set; }
+    public int? ShelfLifeDays { get; set; }
     public List<Ingredient> Ingredients { get; set; } = [];
 }

@@ -402,6 +402,9 @@ namespace ValoresReceitas.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int?>("ShelfLifeDays")
+                        .HasColumnType("int");
+
                     b.Property<string>("UserId")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");

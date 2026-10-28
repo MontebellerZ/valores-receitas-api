@@ -13,7 +13,8 @@ public sealed class RecipeRepository(AppDbContext context) : IRecipeRepository
             .OrderBy(recipe => recipe.Name)
             .Select(recipe => new RecipeDto(recipe.Id, recipe.Name, recipe.Category, recipe.Yield,
                 recipe.HoursPerBatch, recipe.Ingredients.Where(item => item.UserId == userId)
-                    .Select(item => new IngredientDto(item.Id, item.MarketItemId, item.Quantity)).ToList()))
+                    .Select(item => new IngredientDto(item.Id, item.MarketItemId, item.Quantity)).ToList(),
+                recipe.ShelfLifeDays))
             .ToListAsync(cancellationToken);
 
     public Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>

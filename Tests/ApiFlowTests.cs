@@ -318,8 +318,8 @@ public sealed class ApiFlowTests
         Assert.Equal(expected.Recipes.Count, actual.Recipes.Count);
         foreach (var (expectedRecipe, actualRecipe) in expected.Recipes.Zip(actual.Recipes))
         {
-            Assert.Equal((expectedRecipe.Id, expectedRecipe.Name, expectedRecipe.Category, expectedRecipe.Yield, expectedRecipe.HoursPerBatch),
-                (actualRecipe.Id, actualRecipe.Name, actualRecipe.Category, actualRecipe.Yield, actualRecipe.HoursPerBatch));
+            Assert.Equal((expectedRecipe.Id, expectedRecipe.Name, expectedRecipe.Category, expectedRecipe.Yield, expectedRecipe.HoursPerBatch, expectedRecipe.ShelfLifeDays),
+                (actualRecipe.Id, actualRecipe.Name, actualRecipe.Category, actualRecipe.Yield, actualRecipe.HoursPerBatch, actualRecipe.ShelfLifeDays));
             Assert.Equal(expectedRecipe.Ingredients, actualRecipe.Ingredients);
         }
     }
@@ -330,7 +330,7 @@ public sealed class ApiFlowTests
         return new DataSnapshotDto(
             [new MarketItemDto($"{prefix}-market", "Farinha", "g", true)],
             [new RecipeDto($"{prefix}-recipe", "Pao", "", 10, 1,
-                [new IngredientDto($"{prefix}-ingredient", $"{prefix}-market", 500)])],
+                [new IngredientDto($"{prefix}-ingredient", $"{prefix}-market", 500)], 15)],
             [new ProductionDto($"{prefix}-production", date, $"{prefix}-recipe", "Pao", 1, 10, 0, 20, 1, 10, 4, null, 4)],
             [new SaleDto($"{prefix}-sale", $"{prefix}-production", date, "Pao", date, 2, 5, 0.4m, "", false, "")]);
     }

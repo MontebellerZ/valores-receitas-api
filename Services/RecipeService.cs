@@ -15,12 +15,14 @@ public sealed class RecipeService(IRecipeRepository repository, ICurrentUserServ
         validationService.ValidateIds(recipes.Select(recipe => recipe.Id));
         validationService.Require(recipes.All(recipe => recipe.Yield >= 0 && recipe.HoursPerBatch >= 0),
             "Rendimento e horas por lote nao podem ser negativos.");
+        validationService.Require(recipes.All(recipe => recipe.ShelfLifeDays is null or >= 0),
+            "A validade da receita nao pode ser negativa.");
     }
 
     public IEnumerable<Recipe> CreateModels(IEnumerable<RecipeDto> recipes, string userId) =>
         recipes.Select(recipe => new Recipe
         {
             Id = recipe.Id, UserId = userId, Name = recipe.Name, Category = recipe.Category,
-            Yield = recipe.Yield, HoursPerBatch = recipe.HoursPerBatch,
+            Yield = recipe.Yield, HoursPerBatch = recipe.HoursPerBatch, ShelfLifeDays = recipe.ShelfLifeDays,
         });
 }

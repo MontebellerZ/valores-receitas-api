@@ -9,4 +9,5 @@ public sealed record RecipeDto(
     [Required(AllowEmptyStrings = true), MaxLength(100)] string Category,
     decimal Yield,
     decimal HoursPerBatch,
-    [Required] List<IngredientDto> Ingredients);
+    [Required] List<IngredientDto> Ingredients,
+    int? ShelfLifeDays = null);
