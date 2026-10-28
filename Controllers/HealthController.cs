@@ -1,19 +1,18 @@
+using ValoresReceitas.Api.Controllers.Interfaces;
+using ValoresReceitas.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using ValoresReceitas.Api.Data;
+using ValoresReceitas.Api.DTOs;
 
 namespace ValoresReceitas.Api.Controllers;
 
 [ApiController]
 [Route("api/health")]
-public sealed class HealthController(AppDbContext dbContext) : ControllerBase
+public sealed class HealthController(IHealthService service) : ControllerBase, IHealthController
 {
     [HttpGet]
-    public async Task<IActionResult> Get(CancellationToken cancellationToken)
+    public async Task<ActionResult<HealthResponseDto>> Get(CancellationToken cancellationToken)
     {
-        var databaseAvailable = await dbContext.Database.CanConnectAsync(cancellationToken);
-        return databaseAvailable
-            ? Ok(new { status = "ok", database = "connected" })
-            : StatusCode(StatusCodes.Status503ServiceUnavailable, new { status = "unavailable", database = "disconnected" });
+        var response = await service.GetAsync(cancellationToken);
+        return response.Status == "ok" ? Ok(response) : StatusCode(StatusCodes.Status503ServiceUnavailable, response);
     }
 }

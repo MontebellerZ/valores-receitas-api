@@ -1,4 +1,7 @@
 @ValoresReceitas.Api_HostAddress = http://localhost:5232
+@revision = 0
+@lotId = substitua-pelo-id-retornado
+@productionId = substitua-pelo-id-da-producao
 
 GET {{ValoresReceitas.Api_HostAddress}}/api/health
 Accept: application/json
@@ -17,5 +20,61 @@ Content-Type: application/json
 	"market": [],
 	"recipes": [],
 	"productions": [],
-	"sales": []
+	"sales": [],
+	"revision": {{revision}}
 }
+
+### Lotes ativos (requer cookie de login)
+GET {{ValoresReceitas.Api_HostAddress}}/api/stock
+
+### Entrada de um pacote; use a revision atual de GET /api/data
+POST {{ValoresReceitas.Api_HostAddress}}/api/stock
+Content-Type: application/json
+
+{
+  "marketItemId": "id-do-insumo",
+  "entryDate": "2026-10-17",
+  "packageCount": 4,
+  "packageQty": 1000,
+  "packagePrice": 12.50,
+  "revision": {{revision}}
+}
+
+### Consultar pacote, mesmo depois de esgotado
+GET {{ValoresReceitas.Api_HostAddress}}/api/stock/{{lotId}}
+
+### Baixa parcial; para baixa total use remainingQty 0
+PATCH {{ValoresReceitas.Api_HostAddress}}/api/stock/{{lotId}}
+Content-Type: application/json
+
+{
+  "remainingQty": 250,
+  "reason": "Consumo fora de produção",
+  "revision": {{revision}}
+}
+
+### Rastreabilidade dos lotes usados em uma produção
+GET {{ValoresReceitas.Api_HostAddress}}/api/productions/{{productionId}}/consumptions
+
+### Incluir pacotes esgotados para correcao
+GET {{ValoresReceitas.Api_HostAddress}}/api/stock?includeInactive=true
+
+### Corrigir um pacote ou todos os pacotes do mesmo insumo na mesma compra
+PUT {{ValoresReceitas.Api_HostAddress}}/api/stock
+Content-Type: application/json
+
+{
+  "lotIds": ["{{lotId}}"],
+  "packagePrice": 7.98,
+  "reason": "Preco digitado incorretamente no cadastro da compra",
+  "revision": {{revision}}
+}
+
+### Lote inexistente: HTTP 404
+GET {{ValoresReceitas.Api_HostAddress}}/api/stock/lote-inexistente
+
+### Excluir pacote sem movimentacoes: HTTP 204; revision avanca uma unidade
+DELETE {{ValoresReceitas.Api_HostAddress}}/api/stock/{{lotId}}?revision={{revision}}
+
+### Excluir pacote inexistente: HTTP 404
+DELETE {{ValoresReceitas.Api_HostAddress}}/api/stock/lote-inexistente?revision={{revision}}
