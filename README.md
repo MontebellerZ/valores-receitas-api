@@ -40,10 +40,11 @@ Os modulos de insumos, estoque, receitas, ingredientes, producoes e vendas possu
 - `POST /api/auth/confirm-email`: confirma a conta usando o token recebido.
 - `POST /api/auth/resend-confirmation`: reenvia o email de confirmação.
 - `POST /api/auth/login`, `POST /api/auth/logout` e `GET /api/auth/session`: controlam a sessão protegida por cookie HttpOnly.
-- `GET /api/data`: retorna somente os dados do usuário autenticado.
+- `GET /api/data`: snapshot completo do usuário autenticado, reservado à exportação/importação explícita; não deve ser usado para abrir telas ou paginar.
+- `PATCH /api/data`: salva somente registros alterados e IDs explicitamente excluídos. Recebe `market`, `recipes`, `productions`, `sales`, `deleted: {market, recipes, productions, sales}` (todos arrays, mesmo vazios) e `revision`. Retorna apenas os registros alterados canônicos e a nova revisão. Registros não carregados permanecem intactos; validação, estoque FIFO e revisão continuam atômicos.
 - `PUT /api/data`: reconcilia os dados e retorna o snapshot canonico (HTTP 200), incluindo `revision`, custos calculados pelo servidor e saldos de venda.
 - `GET /api/market`: consulta nome e unidade dos insumos; `hasStockHistory` impede exclusao e mudanca de unidade de itens com historico.
-- `GET /api/stock`: lista apenas lotes ativos, ordenados por data da compra e ordem de entrada.
+- `GET /api/stock`: página de lotes ativos, ordenados por ordem de entrada decrescente e ID.
 - `GET /api/stock?includeInactive=true`: inclui pacotes esgotados, mantendo o filtro por proprietario.
 - `GET /api/stock/{id}`: consulta um lote do usuario, inclusive inativo.
 - `POST /api/stock`: registra um pacote comprado com `marketItemId`, `entryDate`, `packageQty` e `packagePrice`. A quantidade e positiva, com ate 4 casas decimais, na unidade do insumo; o preco e nao negativo, com ate 2 casas. Retorna HTTP 201 com `Location`.
@@ -51,15 +52,62 @@ Os modulos de insumos, estoque, receitas, ingredientes, producoes e vendas possu
 - `PATCH /api/stock/{id}`: baixa manual, informando `remainingQty`, `reason` e `revision`; somente diminui o saldo.
 - `PUT /api/stock`: corrige de 1 a 1.000 pacotes na mesma transacao. Recebe `lotIds` (sem duplicatas), `reason` (obrigatorio, ate 500 caracteres), `revision` e pelo menos um campo opcional: `marketItemId`, `entryDate`, `packageQty` ou `packagePrice`. Campos omitidos ou nulos sao preservados. Retorna HTTP 200 com `lot`, `lots` e a nova revisao; dados invalidos retornam 400, revisao obsoleta retorna 409.
 - A correcao permite um pacote individual ou todos os pacotes restantes de uma unica compra (`EntryOrder`), desde que sejam do mesmo insumo. Multiplas compras, insumos diferentes e subconjuntos com mais de um pacote sao rejeitados com HTTP 400, sem alterar dados nem revisao.
-- `DELETE /api/stock/{id}?revision={revision}`: exclui permanentemente um pacote sem consumo (inclusive estornado), baixa ou correcao. Retorna HTTP 204 sem corpo e avanca a revisao em uma unidade; consulte `GET /api/data` para obter a revisao atual. Pacotes com movimentacoes ou revisao obsoleta retornam 409; IDs inexistentes ou de outro usuario retornam 404. Exclusao e revisao usam a mesma transacao; nao altera outros pacotes da compra.
+- `DELETE /api/stock/{id}?revision={revision}`: exclui logicamente um pacote sem consumo de produção e retorna HTTP 200 com `{revision}`. A revisão avança uma unidade na mesma transação; não é necessário recarregar o workspace completo. Revisão obsoleta retorna 409; IDs inexistentes ou de outro usuário retornam 404. Não altera outros pacotes da compra.
 - `GET /api/productions/{id}/consumptions`: lista lotes usados, quantidades e custos historicos.
+- `GET /api/query/productions/{id}/report`: inclui `topBuyers` com até cinco compradores (`customer`, `packages`, `spent`) de todas as vendas da produção, sem depender da página diária. Exclui doações, inclui vendas não pagas e agrupa nomes sem distinguir caixa ou espaços nas pontas. Ordena por pacotes e gasto decrescentes, com desempate pelo nome.
 - `GET /api/recipes`: consulta receitas com seus ingredientes.
 - `GET /api/recipes/{recipeId}/ingredients`: consulta os ingredientes de uma receita do usuario autenticado.
 - `GET /api/productions`: consulta o historico de producoes do usuario autenticado.
 - `GET /api/sales`: consulta as vendas do usuario autenticado.
 - `GET /openapi/v1.json`: documento OpenAPI em ambiente de desenvolvimento.
 
-Cadastros, producoes e vendas continuam em `PUT /api/data`; entradas e baixas manuais usam `api/stock`. As alteracoes enviam a ultima `revision` recebida. Omitir a revisao so e aceito em workspaces sem historico de estoque, para compatibilidade inicial. Categorias, clientes e observacoes podem continuar vazios.
+Cadastros, produções e vendas usam `PATCH /api/data` nas telas; `PUT /api/data` permanece para substituição completa explícita. Entradas e baixas manuais usam `api/stock`. As alterações enviam a última `revision` recebida. Categorias, clientes e observações podem continuar vazios.
+
+### Paginação e consultas enxutas
+
+Todas as rotas de listagem retornam `{items, page, pageSize, totalCount, totalPages}`. O padrão é `page=1&pageSize=10`; somente **10, 25, 50 ou 100** são aceitos. Valores inválidos retornam HTTP 400, sem truncamento silencioso. Páginas além do fim retornam `items: []` com os totais preservados.
+
+`GET /api/query/{market,recipes,productions,sales,stock,balances,stock-totals}` aceita busca `search`, ordenação `sortBy`/`descending` e paginação. As rotas originais `/api/market`, `/api/recipes`, `/api/productions`, `/api/sales`, `/api/stock`, ingredientes e consumos também seguem o contrato paginado (mudança de contrato em relação aos antigos arrays).
+
+- Filtros e ordenação são aplicados no banco **antes** de `Skip/Take`, com desempate por ID e isolamento por usuário. Consultas de leitura não rastreiam entidades.
+- `market`/`recipes`/`productions` aceitam `ids` separados por vírgula (até 100) para resolver somente os registros usados na tela. Receitas na listagem não incluem os ingredientes: retornam `ingredientCount` e `ingredients: []`.
+- `productions`, `sales` e `balances` aceitam `from`/`to` inclusivos. Vendas aceitam `productionId`; receitas aceitam `marketItemId`; estoque aceita `marketItemId`, `entryOrder` e `includeInactive`.
+- `balances?available=true` limita o seletor às produções com saldo. Cada linha contém `production`, `packages`, `soldPackages`, `availablePackages` e `periodSales`. O saldo desconta **todas** as vendas vinculadas, mesmo fora da página/período; `periodSales` considera o período solicitado.
+- `stock` inclui `purchaseLotCount` e `purchaseMixedItems` calculados sobre a compra inteira, não só a página; a edição conjunta pode consultar as páginas de uma compra específica. `stock-totals` agrega os saldos completos e pagina os insumos.
+- `POST /api/stock?compact=true` e `PUT /api/stock?compact=true` omitem o array de pacotes na resposta, mantendo o primeiro lote e a revisão. As telas podem invalidar somente a página afetada, sem receber os até 1.000 pacotes da compra.
+- `GET /api/query/{market,recipes,productions,sales,balances}/{id}` consulta um registro específico; IDs alheios ou inexistentes retornam 404. O detalhe completo de receita permanece disponível para compatibilidade; a edição normal usa os metadados e ingredientes paginados abaixo.
+- `GET /api/query/recipes/{id}/metadata` retorna apenas a ficha da receita e `ingredientCount`, sem carregar ingredientes. O editor usa essa rota com `/ingredients` paginado (`sortBy=id|name|unit|quantity` e busca por nome/unidade).
+- Para edição paginada de ingredientes, `PATCH /api/data` recebe `partialRecipeIngredients: true` e `deletedIngredients: []`. Nesse modo, `recipes[].ingredients` contém apenas inclusões/alterações; ingredientes não carregados são preservados. Exclusões precisam ser explícitas e pertencer às receitas enviadas. A resposta contém somente esses ingredientes alterados e a contagem completa.
+- `GET /api/query/recipes/{id}/ingredients` e `/api/query/productions/{id}/consumptions` retornam páginas das listagens internas.
+- `GET /api/query/summary?from=2026-10-01&to=2026-10-31` retorna revisão, contagens globais e agregados financeiros/de produção calculados no banco, independentes das páginas. As datas filtram vendas pela data de venda e produções pela data de produção.
+- `GET /api/query/productions/{id}/report?page=1&pageSize=10` retorna totais completos da produção e `daily` como uma página de dias com vendas, ordenada por data crescente.
+- As linhas diárias incluem `cumulativeRevenue` calculado desde o primeiro dia da produção, inclusive nas páginas intermediárias. Vendas filtradas por `productionId` incluem o acumulado até cada venda (desempate por data/ID), sem carregar o histórico inteiro no navegador.
+- Ordenações calculadas também são globais: produções aceitam `packages`, `cost`, `profit`; saldos aceitam `packages`, `sold`, `available`, `cost`, `lostPackages`, `revenue` e `profit` (faturamento/resultado das vendas no período); vendas aceitam `total`.
+- Consumos de produção aceitam ordenação por `itemName`, `entryDate`, `unit`, `quantity`, `cost`, `packageQty` e `packagePrice`, sempre antes de recortar a página.
+- Na visão geral, os saldos aceitam `periodSold` (pacotes vendidos no período), `periodPrice` (preço médio realizado, ou preço previsto sem vendas), `periodRevenue` e `periodResult` (valores realizados quando há vendas no período, ou previstos sem vendas). Essas ordenações usam os mesmos filtros de datas e fórmulas exibidos na tela. `price` ordena apenas pelo preço previsto.
+
+`QueryController` traduz HTTP; `QueryService` aplica o usuário atual; `QueryRepository` concentra filtros, projeções, agregações e limites SQL. A API nunca recebe um nome arbitrário de coluna para interpolar em SQL.
+
+A migração `AddPaginationIndexes` adiciona índices filtrados para usuário/nome/ID, usuário/data/ID, vendas por produção, estoque por compra e referências de insumos. Ela é aplicada no início da API, sem alterar os registros existentes.
+
+Os testes de paginação usam SQLite relacional por padrão. Para verificar a tradução e execução das consultas no SQL Server configurado localmente, sem gravar dados, execute em PowerShell:
+
+```powershell
+$env:VALORES_TEST_SQLSERVER_READONLY = "1"
+dotnet test Tests\ValoresReceitas.Api.Tests.csproj --filter FullyQualifiedName~SqlServerQueryTests
+Remove-Item Env:\VALORES_TEST_SQLSERVER_READONLY
+```
+
+Esse teste é opt-in, somente leitura, exige o banco migrado e ao menos uma conta existente. Usa a configuração local sem registrar a conexão ou dados dos usuários. Os testes de escrita e falhas continuam exclusivamente no SQLite isolado.
+
+Para validar a interface sem alterar o banco da aplicação, `BrowserFixtureTests` oferece uma API temporária real em `127.0.0.1:5232`, com SQLite em memória e 113 registros por módulo, incluindo uma receita com 32 ingredientes e uma produção com 32 vendas:
+
+```powershell
+$env:VALORES_BROWSER_FIXTURE = "1"
+dotnet test Tests\ValoresReceitas.Api.Tests.csproj --filter FullyQualifiedName~BrowserFixtureTests --logger "console;verbosity=detailed"
+```
+
+Inicie o front em `http://127.0.0.1:5187`, com `VITE_API_URL=http://127.0.0.1:5232/api`, e use a conta de teste `pagination@example.test` / `Test-only.123`. O servidor dura no máximo 10 minutos; encerre-o ao terminar. Os dados são exclusivos dessa execução e desaparecem ao encerrá-la. Os testes normais não iniciam esse servidor.
 
 ## Estoque e custo FIFO
 

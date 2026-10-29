@@ -63,7 +63,7 @@ public sealed class StockCorrectionTests
         var result = await Correct(client, request);
         Assert.Equal(request.Revision + 1, result.Revision);
         Assert.Equal(4, result.Lots!.Count);
-        var saved = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!;
+        var saved = (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!;
         Assert.All(saved, lot =>
         {
             Assert.Equal("sugar", lot.MarketItemId);
@@ -101,7 +101,7 @@ public sealed class StockCorrectionTests
         var lots = await Buy(client, 2);
         lots[0] = (await Correct(client, (await Request(client, lots.Take(1))) with { PackageQty = 500 })).Lot;
         await Correct(client, (await Request(client, lots)) with { PackagePrice = 0 });
-        var saved = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!;
+        var saved = (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!;
         Assert.All(saved, lot =>
         {
             Assert.Equal(0m, lot.PackagePrice);
@@ -127,13 +127,13 @@ public sealed class StockCorrectionTests
             Assert.Equal(revision, (await Load(client)).Revision);
         }
         await Correct(client, (await Request(client, purchase.Take(1))) with { MarketItemId = "sugar" });
-        var before = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!;
+        var before = (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!;
         revision = (await Load(client)).Revision;
         using var mixed = await client.PutAsJsonAsync("/api/stock",
             (await Request(client, purchase)) with { PackagePrice = 20 });
         Assert.Equal(HttpStatusCode.BadRequest, mixed.StatusCode);
         Assert.Equal(revision, (await Load(client)).Revision);
-        Assert.Equal(before, (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!);
+        Assert.Equal(before, (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!);
     }
 
     [Fact]
@@ -163,11 +163,12 @@ public sealed class StockCorrectionTests
         var lots = await Buy(client, 3);
         var revision = (await Load(client)).Revision!.Value;
         using var deleted = await client.DeleteAsync($"/api/stock/{lots[0].Id}?revision={revision}");
-        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+        Assert.Equal(revision + 1, (await deleted.Content.ReadFromJsonAsync<WorkspaceRevisionDto>())!.Revision);
         Assert.Equal(revision + 1, (await Load(client)).Revision);
         using var missing = await client.GetAsync($"/api/stock/{lots[0].Id}");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
-        var remaining = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!;
+        var remaining = (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!;
         Assert.Equal(2, remaining.Count);
         Assert.DoesNotContain(remaining, lot => lot.Id == lots[0].Id);
         await Correct(client, (await Request(client, remaining)) with { PackagePrice = 8 });
@@ -182,8 +183,8 @@ public sealed class StockCorrectionTests
         var lot = Assert.Single(await Buy(client));
         Assert.True((await Load(client)).Market.Single(item => item.Id == "flour").HasStockHistory);
         using var response = await client.DeleteAsync($"/api/stock/{lot.Id}?revision={(await Load(client)).Revision}");
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!);
         Assert.False((await Load(client)).Market.Single(item => item.Id == "flour").HasStockHistory);
     }
 
@@ -195,7 +196,7 @@ public sealed class StockCorrectionTests
         await Save(client, Catalog);
         var lot = Assert.Single(await Buy(client));
         using var response = await client.DeleteAsync($"/api/stock/{lot.Id}?revision={(await Load(client)).Revision}");
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         await host.WithDatabaseAsync(async db =>
         {
             Assert.Equal(0, await db.StockLots.CountAsync());
@@ -221,8 +222,8 @@ public sealed class StockCorrectionTests
             Assert.True(adjusted.IsSuccessStatusCode);
         }
         using var response = await client.DeleteAsync($"/api/stock/{lots[0].Id}?revision={(await Load(client)).Revision}");
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!);
     }
 
     [Theory]
@@ -238,11 +239,11 @@ public sealed class StockCorrectionTests
         if (movement == "reversed")
             await Save(client, (await Load(client)) with { Productions = [] });
         var revision = (await Load(client)).Revision;
-        var before = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!;
+        var before = (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!;
         using var response = await client.DeleteAsync($"/api/stock/{lots[0].Id}?revision={revision}");
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal(revision, (await Load(client)).Revision);
-        Assert.Equal(before, (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!);
+        Assert.Equal(before, (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!);
     }
 
     [Fact]
@@ -266,7 +267,7 @@ public sealed class StockCorrectionTests
         using var missing = await owner.DeleteAsync($"/api/stock/missing?revision={revision}");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
         Assert.Equal(revision, (await Load(owner)).Revision);
-        Assert.Single((await owner.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Single((await owner.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
     }
 
     [Fact]
@@ -284,7 +285,7 @@ public sealed class StockCorrectionTests
         using var response = await client.DeleteAsync($"/api/stock/{lot.Id}?revision={revision}");
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal(revision, (await Load(client)).Revision);
-        Assert.Equal(lot, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!));
+        Assert.Equal(lot, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!));
     }
 
     [Fact]
@@ -296,18 +297,18 @@ public sealed class StockCorrectionTests
         var lots = await Buy(client);
         var saved = await Save(client, (await Load(client)) with { Productions = [Production("first")] });
         Assert.Equal(7.5m, saved.Productions[0].TotalCost);
-        var original = (await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/first/consumptions"))!;
+        var original = (await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/first/consumptions"))!;
         var result = await Correct(client, (await Request(client, lots)) with
         {
             PackageQty = 2000, PackagePrice = 40, EntryDate = Today.AddDays(-1),
         });
         Assert.Equal(1250m, result.Lot.RemainingQty);
-        Assert.Equal(original, (await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/first/consumptions"))!);
+        Assert.Equal(original, (await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/first/consumptions"))!);
         saved = await Save(client, (await Load(client)) with { Productions = [Production("first"), Production("second")] });
         Assert.Equal(7.5m, saved.Productions.Single(item => item.Id == "first").TotalCost);
         Assert.Equal(15m, saved.Productions.Single(item => item.Id == "second").TotalCost);
         Assert.Equal(500m, (await client.GetFromJsonAsync<StockLotDto>($"/api/stock/{lots[0].Id}"))!.RemainingQty);
-        var second = Assert.Single((await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/second/consumptions"))!);
+        var second = Assert.Single((await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/second/consumptions"))!);
         Assert.Equal(2000m, second.PackageQty);
         Assert.Equal(40m, second.PackagePrice);
     }
@@ -322,13 +323,13 @@ public sealed class StockCorrectionTests
         using var adjustment = await client.PatchAsJsonAsync($"/api/stock/{lots[0].Id}",
             new AdjustStockLotRequestDto { RemainingQty = 0, Reason = "Perda", Revision = (await Load(client)).Revision!.Value });
         Assert.True(adjustment.IsSuccessStatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
-        var inactive = Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
+        var inactive = Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!);
         Assert.False(inactive.IsActive);
         var corrected = await Correct(client, (await Request(client, lots)) with { PackageQty = 1500, PackagePrice = 12 });
         Assert.Equal(500m, corrected.Lot.RemainingQty);
         Assert.True(corrected.Lot.IsActive);
-        Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
     }
 
     [Fact]
@@ -339,7 +340,7 @@ public sealed class StockCorrectionTests
         await Save(client, Catalog);
         var lots = await Buy(client, 2);
         await Save(client, (await Load(client)) with { Productions = [Production("first")] });
-        var before = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!;
+        var before = (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!;
         var request = await Request(client, lots);
         foreach (var invalid in new[]
         {
@@ -351,7 +352,7 @@ public sealed class StockCorrectionTests
             using var rejected = await client.PutAsJsonAsync("/api/stock", invalid);
             Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
             Assert.Equal(request.Revision, (await Load(client)).Revision);
-            Assert.Equal(before, (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock?includeInactive=true"))!);
+            Assert.Equal(before, (await client.GetPageItemsAsync<StockLotDto>("/api/stock?includeInactive=true"))!);
         }
         await host.WithDatabaseAsync(async db => Assert.Equal(0, await db.StockAdjustments.CountAsync()));
     }
@@ -420,7 +421,8 @@ public sealed class StockCorrectionTests
         using var response = await client.PutAsJsonAsync("/api/stock", request);
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal(request.Revision, (await Load(client)).Revision);
-        Assert.Equal(lots.OrderBy(lot => lot.Id), (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!.OrderBy(lot => lot.Id));
+        Assert.Equal(lots.Select(lot => lot with { PurchaseLotCount = lots.Count }).OrderBy(lot => lot.Id),
+            (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!.OrderBy(lot => lot.Id));
         await host.WithDatabaseAsync(async db => Assert.Equal(0, await db.StockAdjustments.CountAsync()));
     }
 
@@ -444,7 +446,7 @@ public sealed class StockCorrectionTests
             Assert.Equal(10m, consumption.PackagePrice);
         });
         await Correct(client, (await Request(client, lots)) with { PackagePrice = 40, PackageQty = 2000 });
-        var historical = Assert.Single((await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/legacy/consumptions"))!);
+        var historical = Assert.Single((await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/legacy/consumptions"))!);
         Assert.Equal(10m, historical.PackagePrice);
         Assert.Equal(1000m, historical.PackageQty);
         Assert.Equal(7.5m, historical.Cost);

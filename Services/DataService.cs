@@ -41,86 +41,178 @@ public sealed class DataService(
     public async Task<DataSnapshotDto> ReplaceAsync(DataSnapshotDto snapshot, CancellationToken cancellationToken)
     {
         Validate(snapshot);
-        var userId = currentUser.Id;
         DataSnapshotDto? response = null;
         await unitOfWork.ExecuteAsync(async () =>
         {
-            await workspaceRepository.AdvanceRevisionAsync(userId, snapshot.Revision, cancellationToken);
-            await EnsureOwnershipAsync(snapshot, userId, cancellationToken);
-            var existing = (await workspaceRepository.ProductionsAsync(userId, cancellationToken))
-                .ToDictionary(item => item.Id, StringComparer.Ordinal);
-            var saved = new Dictionary<string, Models.Production>(StringComparer.Ordinal);
-            foreach (var model in productionService.CreateModels(snapshot.Productions, userId))
+            response = await ReplaceWithinTransactionAsync(snapshot, cancellationToken);
+        }, cancellationToken);
+        return response!;
+    }
+
+    public async Task<DataSnapshotDto> PatchAsync(WorkspacePatchDto patch, CancellationToken cancellationToken)
+    {
+        validationService.Require(patch.Market is not null && patch.Recipes is not null &&
+            patch.Productions is not null && patch.Sales is not null && patch.Deleted is not null,
+            "Informe as alterações e exclusões.");
+        var deleted = patch.Deleted!;
+        validationService.Require(deleted.Market is not null && deleted.Recipes is not null &&
+            deleted.Productions is not null && deleted.Sales is not null, "Informe as listas de exclusões.");
+        validationService.Require(patch.PartialRecipeIngredients || patch.DeletedIngredients is null or { Count: 0 },
+            "Exclusões de ingredientes exigem o modo de edição parcial.");
+        DataSnapshotDto? response = null;
+        await unitOfWork.ExecuteAsync(async () =>
+        {
+            var current = await ReadSnapshotAsync(cancellationToken);
+            var recipes = patch.Recipes!;
+            if (patch.PartialRecipeIngredients)
             {
-                if (existing.Remove(model.Id, out var previous))
+                ingredientService.Validate(recipes);
+                var deletedIngredients = patch.DeletedIngredients ?? [];
+                validationService.ValidateIds(deletedIngredients);
+                var recipeIds = recipes.Select(recipe => recipe.Id).ToHashSet(StringComparer.Ordinal);
+                var editableIngredients = current.Recipes.Where(recipe => recipeIds.Contains(recipe.Id))
+                    .SelectMany(recipe => recipe.Ingredients).Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+                validationService.Require(deletedIngredients.All(editableIngredients.Contains),
+                    "Um ingrediente excluído não pertence às receitas alteradas.");
+                validationService.Require(!recipes.SelectMany(recipe => recipe.Ingredients)
+                    .Any(item => deletedIngredients.Contains(item.Id)),
+                    "Um ingrediente não pode ser alterado e excluído na mesma requisição.");
+                recipes = recipes.Select(recipe =>
                 {
-                    validationService.Require(!previous.IsDeleted, "Uma produção removida não pode ser reutilizada.");
-                    if (previous.Quantity > 0)
+                    var existing = current.Recipes.Find(item => item.Id == recipe.Id)?.Ingredients ?? [];
+                    var removedIngredients = deletedIngredients.Where(id => existing.Any(item => item.Id == id)).ToList();
+                    return recipe with { Ingredients = Merge(existing, recipe.Ingredients, removedIngredients, item => item.Id) };
+                }).ToList();
+            }
+            var merged = new DataSnapshotDto(
+                Merge(current.Market, patch.Market!, deleted.Market!, item => item.Id),
+                Merge(current.Recipes, recipes, deleted.Recipes!, item => item.Id),
+                Merge(current.Productions, patch.Productions!, deleted.Productions!, item => item.Id),
+                Merge(current.Sales, patch.Sales!, deleted.Sales!, item => item.Id), patch.Revision);
+            ingredientService.Validate(merged.Recipes);
+            // Removing a catalog item also removes its references, as in the catalog editor.
+            if (deleted.Market!.Count > 0)
+                merged = merged with
+                {
+                    Recipes = merged.Recipes.Select(recipe => recipe with
                     {
-                        validationService.Require(previous.RecipeId == model.RecipeId && previous.Quantity == model.Quantity,
-                            "Receita e quantidade de uma produção salva são imutáveis. Registre uma nova produção.");
-                        validationService.Require(previous.IsStandalone == model.IsStandalone,
-                            "O tipo de uma produção salva (normal ou avulsa) não pode ser alterado.");
-                        validationService.Require(previous.PackageQty == model.PackageQty ||
-                            !snapshot.Sales.Any(sale => sale.ProductionId == model.Id),
-                            "Uma produção com vendas não pode mudar a quantidade por pacote.");
-                        previous.Date = model.Date;
-                        previous.ActualYield = model.ActualYield;
-                        previous.Losses = model.Losses;
-                        previous.Margin = model.Margin;
-                        previous.PackageQty = model.PackageQty;
-                        previous.ExpectedSalePrice = model.ExpectedSalePrice;
-                        previous.LostPackages = model.LostPackages;
-                        if (previous.IsStandalone) ApplyManualCost(previous, model.TotalCost!.Value);
-                        saved.Add(previous.Id, previous);
-                        continue;
-                    }
-                    previous.RecipeId = model.RecipeId;
-                    previous.RecipeName = model.RecipeName;
+                        Ingredients = recipe.Ingredients.Where(item => !deleted.Market.Contains(item.MarketItemId)).ToList(),
+                    }).ToList()
+                };
+            Validate(merged);
+            var saved = await ReplaceWithinTransactionAsync(merged, cancellationToken);
+            response = new(
+                saved.Market.Where(item => patch.Market!.Any(changed => changed.Id == item.Id)).ToList(),
+                saved.Recipes.Where(item => patch.Recipes!.Any(changed => changed.Id == item.Id))
+                    .Select(item => patch.PartialRecipeIngredients
+                        ? item with
+                        {
+                            IngredientCount = item.Ingredients.Count,
+                            Ingredients = item.Ingredients.Where(ingredient =>
+                                patch.Recipes!.Any(recipe => recipe.Id == item.Id &&
+                                    recipe.Ingredients.Any(changed => changed.Id == ingredient.Id))).ToList(),
+                        }
+                        : item).ToList(),
+                saved.Productions.Where(item => patch.Productions!.Any(changed => changed.Id == item.Id)).ToList(),
+                saved.Sales.Where(item => patch.Sales!.Any(changed => changed.Id == item.Id)).ToList(),
+                saved.Revision);
+        }, cancellationToken);
+        return response!;
+    }
+
+    private List<T> Merge<T>(List<T> current, List<T> changed, List<string> deleted, Func<T, string> id)
+        where T : class
+    {
+        validationService.Require(changed.All(item => item is not null), "As alterações não podem conter itens nulos.");
+        validationService.ValidateIds(changed.Select(id));
+        validationService.ValidateIds(deleted);
+        validationService.Require(!changed.Any(item => deleted.Contains(id(item))),
+            "Um registro não pode ser alterado e excluído na mesma requisição.");
+        validationService.Require(deleted.All(value => current.Any(item => id(item) == value)),
+            "Um registro excluído não foi encontrado nesta conta.");
+        var changedIds = changed.Select(id).ToHashSet(StringComparer.Ordinal);
+        var deletedIds = deleted.ToHashSet(StringComparer.Ordinal);
+        return current.Where(item => !changedIds.Contains(id(item)) && !deletedIds.Contains(id(item)))
+            .Concat(changed).ToList();
+    }
+
+    private async Task<DataSnapshotDto> ReplaceWithinTransactionAsync(DataSnapshotDto snapshot, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.Id;
+        await workspaceRepository.AdvanceRevisionAsync(userId, snapshot.Revision, cancellationToken);
+        await EnsureOwnershipAsync(snapshot, userId, cancellationToken);
+        var existing = (await workspaceRepository.ProductionsAsync(userId, cancellationToken))
+            .ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var saved = new Dictionary<string, Models.Production>(StringComparer.Ordinal);
+        foreach (var model in productionService.CreateModels(snapshot.Productions, userId))
+        {
+            if (existing.Remove(model.Id, out var previous))
+            {
+                validationService.Require(!previous.IsDeleted, "Uma produção removida não pode ser reutilizada.");
+                if (previous.Quantity > 0)
+                {
+                    validationService.Require(previous.RecipeId == model.RecipeId && previous.Quantity == model.Quantity,
+                        "Receita e quantidade de uma produção salva são imutáveis. Registre uma nova produção.");
+                    validationService.Require(previous.IsStandalone == model.IsStandalone,
+                        "O tipo de uma produção salva (normal ou avulsa) não pode ser alterado.");
+                    validationService.Require(previous.PackageQty == model.PackageQty ||
+                        !snapshot.Sales.Any(sale => sale.ProductionId == model.Id),
+                        "Uma produção com vendas não pode mudar a quantidade por pacote.");
                     previous.Date = model.Date;
-                    previous.Quantity = model.Quantity;
                     previous.ActualYield = model.ActualYield;
                     previous.Losses = model.Losses;
                     previous.Margin = model.Margin;
                     previous.PackageQty = model.PackageQty;
                     previous.ExpectedSalePrice = model.ExpectedSalePrice;
-                    previous.YieldPerBatch = model.YieldPerBatch;
-                    previous.IsStandalone = model.IsStandalone;
-                    previous.TotalCost = model.TotalCost;
                     previous.LostPackages = model.LostPackages;
-                    await PriceProductionAsync(previous, snapshot, cancellationToken);
+                    if (previous.IsStandalone) ApplyManualCost(previous, model.TotalCost!.Value);
                     saved.Add(previous.Id, previous);
+                    continue;
                 }
-                else
-                {
-                    await PriceProductionAsync(model, snapshot, cancellationToken);
-                    workspaceRepository.AddProduction(model);
-                    saved.Add(model.Id, model);
-                }
+                previous.RecipeId = model.RecipeId;
+                previous.RecipeName = model.RecipeName;
+                previous.Date = model.Date;
+                previous.Quantity = model.Quantity;
+                previous.ActualYield = model.ActualYield;
+                previous.Losses = model.Losses;
+                previous.Margin = model.Margin;
+                previous.PackageQty = model.PackageQty;
+                previous.ExpectedSalePrice = model.ExpectedSalePrice;
+                previous.YieldPerBatch = model.YieldPerBatch;
+                previous.IsStandalone = model.IsStandalone;
+                previous.TotalCost = model.TotalCost;
+                previous.LostPackages = model.LostPackages;
+                await PriceProductionAsync(previous, snapshot, cancellationToken);
+                saved.Add(previous.Id, previous);
             }
-            foreach (var removed in existing.Values) removed.IsDeleted = true;
-            var sales = saleService.CreateModels(snapshot.Sales, userId).ToList();
-            var previousSales = (await saleRepository.ListAsync(userId, cancellationToken)).ToDictionary(item => item.Id);
-            foreach (var sale in sales)
+            else
             {
-                var production = saved[sale.ProductionId];
-                validationService.Require(production.Quantity > 0, "Salve a produção antes de registrar vendas.");
-                sale.RecipeName = production.RecipeName;
-                sale.ProductionDate = production.Date;
-                var packages = decimal.Floor((production.ActualYield - production.Losses) / production.PackageQty);
-                sale.CostPerPackage = previousSales.TryGetValue(sale.Id, out var previousSale) && previousSale.ProductionId == sale.ProductionId
-                    ? previousSale.CostPerPackage : packages > 0
-                    ? decimal.Round((production.TotalCost ?? production.IngredientCostPerBatch * production.Quantity) / packages, 2)
-                    : 0;
+                await PriceProductionAsync(model, snapshot, cancellationToken);
+                workspaceRepository.AddProduction(model);
+                saved.Add(model.Id, model);
             }
-            await workspaceRepository.SyncCatalogAsync(userId,
-                marketService.CreateModels(snapshot.Market, userId),
-                recipeService.CreateModels(snapshot.Recipes, userId),
-                ingredientService.CreateModels(snapshot.Recipes, userId), sales, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            response = await ReadSnapshotAsync(cancellationToken);
-        }, cancellationToken);
-        return response!;
+        }
+        foreach (var removed in existing.Values) removed.IsDeleted = true;
+        var sales = saleService.CreateModels(snapshot.Sales, userId).ToList();
+        var previousSales = (await saleRepository.ListAsync(userId, cancellationToken)).ToDictionary(item => item.Id);
+        foreach (var sale in sales)
+        {
+            var production = saved[sale.ProductionId];
+            validationService.Require(production.Quantity > 0, "Salve a produção antes de registrar vendas.");
+            sale.RecipeName = production.RecipeName;
+            sale.ProductionDate = production.Date;
+            var packages = decimal.Floor((production.ActualYield - production.Losses) / production.PackageQty);
+            sale.CostPerPackage = previousSales.TryGetValue(sale.Id, out var previousSale) && previousSale.ProductionId == sale.ProductionId
+                ? previousSale.CostPerPackage : packages > 0
+                ? decimal.Round((production.TotalCost ?? production.IngredientCostPerBatch * production.Quantity) / packages, 2)
+                : 0;
+        }
+        await workspaceRepository.SyncCatalogAsync(userId,
+            marketService.CreateModels(snapshot.Market, userId),
+            recipeService.CreateModels(snapshot.Recipes, userId),
+            ingredientService.CreateModels(snapshot.Recipes, userId), sales, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return await ReadSnapshotAsync(cancellationToken);
     }
 
     private async Task PriceProductionAsync(Models.Production production, DataSnapshotDto snapshot, CancellationToken ct)

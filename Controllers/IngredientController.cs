@@ -9,11 +9,11 @@ namespace ValoresReceitas.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/recipes/{recipeId}/ingredients")]
-public sealed class IngredientController(IIngredientService service) : ControllerBase, IIngredientController
+public sealed class IngredientController(IQueryService service) : ControllerBase, IIngredientController
 {
     [HttpGet]
-    public async Task<ActionResult<List<IngredientDto>>> Get(string recipeId, CancellationToken cancellationToken)
+    public async Task<ActionResult<PageDto<IngredientDto>>> Get(string recipeId, [FromQuery] PageQueryDto query, CancellationToken cancellationToken)
     {
-        return Ok(await service.ListAsync(recipeId, cancellationToken));
+        return Ok(await service.IngredientsAsync(recipeId, query, cancellationToken));
     }
 }

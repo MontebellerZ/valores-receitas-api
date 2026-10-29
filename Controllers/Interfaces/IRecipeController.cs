@@ -5,5 +5,5 @@ namespace ValoresReceitas.Api.Controllers.Interfaces;
 
 public interface IRecipeController
 {
-    Task<ActionResult<List<RecipeDto>>> Get(CancellationToken cancellationToken);
+    Task<ActionResult<PageDto<RecipeDto>>> Get(PageQueryDto query, CancellationToken cancellationToken);
 }

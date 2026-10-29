@@ -21,6 +21,9 @@ public static class ServiceRegistration
         services.AddScoped<IProductionService, ProductionService>();
         services.AddScoped<ISaleService, SaleService>();
         services.AddScoped<IDataService, DataService>();
+        services.AddScoped<IQueryService, QueryService>();
+        services.AddScoped<IQueryRepository, QueryRepository>();
+        services.AddScoped<IQueryController, QueryController>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IHealthService, HealthService>();
         services.AddTransient<IEmailService, EmailService>();

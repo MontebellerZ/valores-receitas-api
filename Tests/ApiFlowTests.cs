@@ -31,15 +31,16 @@ public sealed class ApiFlowTests
         var ingredient = raw.RootElement.GetProperty("recipes")[0].GetProperty("ingredients")[0];
         Assert.False(ingredient.TryGetProperty("recipeId", out _));
         Assert.False(ingredient.TryGetProperty("userId", out _));
-        Assert.Equal(snapshot.Market, await client.GetFromJsonAsync<List<MarketItemDto>>("/api/market"));
-        Assert.Single((await client.GetFromJsonAsync<List<RecipeDto>>("/api/recipes"))!);
+        Assert.Equal(snapshot.Market.Select(item => item with { IngredientCount = 1 }),
+            await client.GetPageItemsAsync<MarketItemDto>("/api/market"));
+        Assert.Single((await client.GetPageItemsAsync<RecipeDto>("/api/recipes"))!);
         Assert.Equal(snapshot.Recipes[0].Ingredients,
-            await client.GetFromJsonAsync<List<IngredientDto>>("/api/recipes/owner-recipe/ingredients"));
-        Assert.Equal(snapshot.Productions, await client.GetFromJsonAsync<List<ProductionDto>>("/api/productions"));
-        Assert.Equal(snapshot.Sales, await client.GetFromJsonAsync<List<SaleDto>>("/api/sales"));
+            await client.GetPageItemsAsync<IngredientDto>("/api/recipes/owner-recipe/ingredients"));
+        Assert.Equal(snapshot.Productions, await client.GetPageItemsAsync<ProductionDto>("/api/productions"));
+        Assert.Equal(snapshot.Sales, await client.GetPageItemsAsync<SaleDto>("/api/sales"));
         var donated = snapshot.Sales[0] with { PricePerPackage = 0, Paid = true, Donated = true };
         (await PutSnapshotAsync(client, snapshot with { Sales = [donated] })).EnsureSuccessStatusCode();
-        Assert.True((await client.GetFromJsonAsync<List<SaleDto>>("/api/sales"))!.Single().Donated);
+        Assert.True((await client.GetPageItemsAsync<SaleDto>("/api/sales"))!.Single().Donated);
         Assert.Equal("connected", (await client.GetFromJsonAsync<HealthResponseDto>("/api/health"))!.Database);
         using var replace = await PutSnapshotAsync(client, snapshot with { Sales = [] });
         Assert.Equal(HttpStatusCode.OK, replace.StatusCode);
@@ -55,7 +56,7 @@ public sealed class ApiFlowTests
         (await PutSnapshotAsync(first, Snapshot("first"))).EnsureSuccessStatusCode();
         (await PutSnapshotAsync(second, Snapshot("second"))).EnsureSuccessStatusCode();
         Assert.Equal("first-market", (await first.GetFromJsonAsync<DataSnapshotDto>("/api/data"))!.Market.Single().Id);
-        Assert.Empty((await second.GetFromJsonAsync<List<IngredientDto>>("/api/recipes/first-recipe/ingredients"))!);
+        Assert.Empty((await second.GetPageItemsAsync<IngredientDto>("/api/recipes/first-recipe/ingredients"))!);
         (await PutSnapshotAsync(first, Snapshot("first") with { Recipes = [], Productions = [], Sales = [] })).EnsureSuccessStatusCode();
         Assert.Equal("second-market", (await second.GetFromJsonAsync<DataSnapshotDto>("/api/data"))!.Market.Single().Id);
     }
@@ -256,8 +257,8 @@ public sealed class ApiFlowTests
         });
         using var first = await host.CreateUserAsync("first@example.test");
         using var second = await host.CreateUserAsync("second@example.test");
-        Assert.Single((await first.GetFromJsonAsync<List<MarketItemDto>>("/api/market"))!);
-        Assert.Empty((await second.GetFromJsonAsync<List<MarketItemDto>>("/api/market"))!);
+        Assert.Single((await first.GetPageItemsAsync<MarketItemDto>("/api/market"))!);
+        Assert.Empty((await second.GetPageItemsAsync<MarketItemDto>("/api/market"))!);
     }
 
     [Fact]

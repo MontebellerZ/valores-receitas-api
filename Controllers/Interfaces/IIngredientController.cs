@@ -5,5 +5,5 @@ namespace ValoresReceitas.Api.Controllers.Interfaces;
 
 public interface IIngredientController
 {
-    Task<ActionResult<List<IngredientDto>>> Get(string recipeId, CancellationToken cancellationToken);
+    Task<ActionResult<PageDto<IngredientDto>>> Get(string recipeId, PageQueryDto query, CancellationToken cancellationToken);
 }

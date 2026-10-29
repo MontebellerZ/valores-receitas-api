@@ -263,6 +263,9 @@ namespace ValoresReceitas.Api.Migrations
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
+                    b.HasIndex("UserId", "MarketItemId")
+                        .HasFilter("[IsDeleted] = 0");
+
                     b.ToTable("Ingredients");
                 });
 
@@ -300,6 +303,9 @@ namespace ValoresReceitas.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Name", "Id")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("MarketItems");
                 });
@@ -376,6 +382,9 @@ namespace ValoresReceitas.Api.Migrations
 
                     b.HasIndex("UserId");
 
+                    b.HasIndex("UserId", "Date", "Id")
+                        .HasFilter("[IsDeleted] = 0");
+
                     b.ToTable("Productions");
                 });
 
@@ -416,6 +425,9 @@ namespace ValoresReceitas.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Name", "Id")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("Recipes");
                 });
@@ -481,6 +493,12 @@ namespace ValoresReceitas.Api.Migrations
                     b.HasIndex("ProductionId");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Date", "Id")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("UserId", "ProductionId", "Date", "Id")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("Sales");
                 });
@@ -631,6 +649,9 @@ namespace ValoresReceitas.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("MarketItemId");
+
+                    b.HasIndex("UserId", "EntryOrder", "Id")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("UserId", "MarketItemId", "EntryDate", "EntryOrder");
 

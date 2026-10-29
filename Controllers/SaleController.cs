@@ -9,9 +9,9 @@ namespace ValoresReceitas.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/sales")]
-public sealed class SaleController(ISaleService service) : ControllerBase, ISaleController
+public sealed class SaleController(IQueryService service) : ControllerBase, ISaleController
 {
     [HttpGet]
-    public async Task<ActionResult<List<SaleDto>>> Get(CancellationToken cancellationToken) =>
-        Ok(await service.ListAsync(cancellationToken));
+    public async Task<ActionResult<PageDto<SaleDto>>> Get([FromQuery] PageQueryDto query, CancellationToken cancellationToken) =>
+        Ok(await service.SalesAsync(query, cancellationToken));
 }

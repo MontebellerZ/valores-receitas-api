@@ -19,17 +19,22 @@ using Xunit;
 
 namespace ValoresReceitas.Api.Tests;
 
-internal sealed class ApiTestHost(WebApplication app, SqliteConnection connection) : IAsyncDisposable
+internal sealed class ApiTestHost(WebApplication app, SqliteConnection connection, bool browser = false) : IAsyncDisposable
 {
     public const string Password = "Test-only.123";
     public TestEmailSender EmailSender => app.Services.GetRequiredService<TestEmailSender>();
 
-    public static async Task<ApiTestHost> CreateAsync()
+    public static async Task<ApiTestHost> CreateAsync(bool browser = false)
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = new SqliteConnection(browser
+            ? $"Data Source=BrowserFixture_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
+            : "Data Source=:memory:");
         await connection.OpenAsync();
         var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseTestServer();
+        if (browser)
+            builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:5232");
+        else
+            builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole().SetMinimumLevel(LogLevel.Error);
         builder.Logging.AddFilter((_, level) => level >= LogLevel.Error);
@@ -37,7 +42,11 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
         builder.Services.AddApplicationServices();
         builder.Services.AddProblemDetails();
         builder.Services.AddExceptionHandler<ServiceExceptionHandler>();
-        builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+        builder.Services.AddDbContext<AppDbContext>(options =>
+        {
+            if (browser) options.UseSqlite(connection.ConnectionString);
+            else options.UseSqlite(connection);
+        });
         builder.Services.AddIdentityCore<AccountUser>(options =>
         {
             options.User.RequireUniqueEmail = true;
@@ -46,6 +55,9 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
         }).AddEntityFrameworkStores<AppDbContext>().AddSignInManager().AddDefaultTokenProviders();
         builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
         builder.Services.AddAuthorization();
+        if (browser)
+            builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+                policy.WithOrigins("http://127.0.0.1:5187").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
         builder.Services.ConfigureApplicationCookie(options =>
         {
             options.Events.OnRedirectToLogin = context =>
@@ -59,6 +71,7 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
         builder.Services.AddSingleton<IEmailSender<AccountUser>>(provider => provider.GetRequiredService<TestEmailSender>());
         var app = builder.Build();
         app.UseExceptionHandler();
+        if (browser) app.UseCors();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
@@ -67,10 +80,12 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
             await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreatedAsync();
         }
         await app.StartAsync();
-        return new ApiTestHost(app, connection);
+        return new ApiTestHost(app, connection, browser);
     }
 
-    public HttpClient CreateClient() => app.GetTestClient();
+    public HttpClient CreateClient() => browser
+        ? new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = new Uri("http://127.0.0.1:5232") }
+        : app.GetTestClient();
 
     public async Task<HttpClient> CreateUserAsync(string email, bool confirmed = true)
     {

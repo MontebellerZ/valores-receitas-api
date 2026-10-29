@@ -10,4 +10,5 @@ public sealed record RecipeDto(
     decimal Yield,
     decimal HoursPerBatch,
     [Required] List<IngredientDto> Ingredients,
-    int? ShelfLifeDays = null);
+    int? ShelfLifeDays = null,
+    int IngredientCount = 0);

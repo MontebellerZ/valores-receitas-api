@@ -5,6 +5,6 @@ namespace ValoresReceitas.Api.Controllers.Interfaces;
 
 public interface IProductionController
 {
-    Task<ActionResult<List<ProductionDto>>> Get(CancellationToken cancellationToken);
-    Task<ActionResult<List<StockConsumptionDto>>> Consumptions(string id, CancellationToken ct);
+    Task<ActionResult<PageDto<ProductionDto>>> Get(PageQueryDto query, CancellationToken cancellationToken);
+    Task<ActionResult<PageDto<StockConsumptionDto>>> Consumptions(string id, PageQueryDto query, CancellationToken ct);
 }

@@ -64,7 +64,7 @@ public sealed class InventoryFlowTests
         Assert.Equal(4, result.Lots!.Count);
         Assert.Contains(result.Lot, result.Lots);
         Assert.Equal(before.Revision + 1, result.Revision);
-        var lots = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!;
+        var lots = (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!;
         Assert.Equal(4, lots.Select(lot => lot.Id).Distinct().Count());
         Assert.All(lots, lot =>
         {
@@ -82,10 +82,10 @@ public sealed class InventoryFlowTests
         Assert.Equal(result.Revision, snapshot.Revision);
         snapshot = await Save(client, snapshot with { Productions = [Production() with { Date = date }] });
         Assert.Equal(9.975m, Assert.Single(snapshot.Productions).TotalCost);
-        var remaining = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!;
+        var remaining = (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!;
         Assert.Equal(3, remaining.Count);
         Assert.Equal(550m, remaining.Sum(lot => lot.RemainingQty));
-        Assert.Equal(2, (await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!.Count);
+        Assert.Equal(2, (await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!.Count);
     }
 
     [Theory]
@@ -107,7 +107,7 @@ public sealed class InventoryFlowTests
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(before.Revision, (await Load(client)).Revision);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public sealed class InventoryFlowTests
         });
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal(before.Revision, (await Load(client)).Revision);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
     }
 
     [Fact]
@@ -151,11 +151,11 @@ public sealed class InventoryFlowTests
         Assert.Equal(17.5m, production.IngredientCostPerBatch);
         Assert.Equal("Pão", production.RecipeName);
         Assert.Equal(10, production.YieldPerBatch);
-        var consumptions = (await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!;
+        var consumptions = (await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!;
         Assert.Equal(new[] { oldest.Id, sameDate.Id }, consumptions.Select(item => item.StockLotId));
         Assert.Equal(new[] { 1000m, 250m }, consumptions.Select(item => item.Quantity));
         Assert.Equal(new[] { 10m, 7.5m }, consumptions.Select(item => item.Cost));
-        var lots = (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!;
+        var lots = (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!;
         Assert.Equal(2, lots.Count);
         Assert.Equal(750, lots.Single(lot => lot.Id == sameDate.Id).RemainingQty);
         Assert.Equal(1000, lots.Single(lot => lot.Id == recent.Id).RemainingQty);
@@ -183,7 +183,7 @@ public sealed class InventoryFlowTests
         snapshot = await Save(client, snapshot with { Productions = [Production("one"), Production("two")] });
         Assert.Equal(7.5m, snapshot.Productions.Single(item => item.Id == "one").TotalCost);
         Assert.Equal(17.5m, snapshot.Productions.Single(item => item.Id == "two").TotalCost);
-        Assert.Equal(500, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!).RemainingQty);
+        Assert.Equal(500, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!).RemainingQty);
         await Save(client, snapshot);
         await host.WithDatabaseAsync(async db => Assert.Equal(3, await db.StockConsumptions.CountAsync()));
     }
@@ -206,12 +206,12 @@ public sealed class InventoryFlowTests
         var after = await Load(client);
         Assert.Equal(before.Revision, after.Revision);
         Assert.Empty(after.Productions);
-        Assert.Equal(1000, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!).RemainingQty);
+        Assert.Equal(1000, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!).RemainingQty);
         await host.WithDatabaseAsync(async db => Assert.Empty(await db.StockConsumptions.ToListAsync()));
         await Buy(client, 2, itemId: "milk", quantity: 100);
         after = await Load(client);
         await Save(client, after with { Productions = [Production()] });
-        Assert.Equal(250, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!).RemainingQty);
+        Assert.Equal(250, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!).RemainingQty);
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public sealed class InventoryFlowTests
             RemainingQty = 0, Reason = "Descarte", Revision = snapshot.Revision!.Value,
         });
         Assert.Equal(HttpStatusCode.OK, finish.StatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
         snapshot = await Load(client);
         Assert.True(snapshot.Market.Single(item => item.Id == "flour").HasStockHistory);
         using var removeItem = await client.PutAsJsonAsync("/api/data", snapshot with { Market = [], Recipes = [] });
@@ -246,7 +246,7 @@ public sealed class InventoryFlowTests
         using var consume = await client.PutAsJsonAsync("/api/data", snapshot with { Productions = [Production()] });
         Assert.Equal(HttpStatusCode.Conflict, consume.StatusCode);
         using var deletion = await client.DeleteAsync($"/api/stock/{lot.Id}?revision={snapshot.Revision}");
-        Assert.Equal(HttpStatusCode.NoContent, deletion.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, deletion.StatusCode);
         await host.WithDatabaseAsync(async db =>
         {
             Assert.Equal(0, await db.StockLots.CountAsync());
@@ -267,19 +267,19 @@ public sealed class InventoryFlowTests
         snapshot = await Save(client, snapshot with { Productions = [Production(quantity: 0)] });
         Assert.Null(snapshot.Productions[0].TotalCost);
         Assert.Equal(0, snapshot.Productions[0].IngredientCostPerBatch);
-        Assert.Equal(1000, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!).RemainingQty);
+        Assert.Equal(1000, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!).RemainingQty);
         snapshot = await Save(client, snapshot with { Productions = [Production()] });
         using var edit = await client.PutAsJsonAsync("/api/data", snapshot with { Productions = [Production(quantity: 2)] });
         Assert.Equal(HttpStatusCode.BadRequest, edit.StatusCode);
         snapshot = await Save(client, snapshot with { Productions = [] });
         Assert.Empty(snapshot.Productions);
-        Assert.Equal(250, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!).RemainingQty);
+        Assert.Equal(250, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!).RemainingQty);
         await host.WithDatabaseAsync(async db =>
         {
             Assert.True((await db.Productions.IgnoreQueryFilters().SingleAsync()).IsDeleted);
             Assert.Single(await db.StockConsumptions.ToListAsync());
         });
-        Assert.Single((await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!);
+        Assert.Single((await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!);
         using var reuse = await client.PutAsJsonAsync("/api/data", snapshot with { Productions = [Production()] });
         Assert.Equal(HttpStatusCode.BadRequest, reuse.StatusCode);
     }
@@ -300,8 +300,8 @@ public sealed class InventoryFlowTests
         Assert.Equal(HttpStatusCode.Conflict, missingVersion.StatusCode);
         var current = await Load(owner);
         await Save(owner, current with { Productions = [Production()] });
-        Assert.Empty((await stranger.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
-        Assert.Empty((await stranger.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!);
+        Assert.Empty((await stranger.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
+        Assert.Empty((await stranger.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!);
         Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync($"/api/stock/{lot.Id}")).StatusCode);
         var strangerState = await Load(stranger);
         using var wrongOwner = await stranger.PatchAsJsonAsync($"/api/stock/{lot.Id}", new AdjustStockLotRequestDto
@@ -309,7 +309,7 @@ public sealed class InventoryFlowTests
             RemainingQty = 0, Reason = "Tentativa", Revision = strangerState.Revision!.Value,
         });
         Assert.Equal(HttpStatusCode.BadRequest, wrongOwner.StatusCode);
-        Assert.Equal(1250, (await owner.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!.Sum(item => item.RemainingQty));
+        Assert.Equal(1250, (await owner.GetPageItemsAsync<StockLotDto>("/api/stock"))!.Sum(item => item.RemainingQty));
     }
 
     [Fact]
@@ -352,14 +352,14 @@ public sealed class InventoryFlowTests
         var large = await Buy(client, 15, itemId: "butter", quantity: 500);
         var snapshot = await Load(client);
         Assert.Single(snapshot.Market);
-        Assert.Equal(700, (await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!.Sum(lot => lot.RemainingQty));
+        Assert.Equal(700, (await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!.Sum(lot => lot.RemainingQty));
         snapshot = await Save(client, snapshot with { Productions = [Production()] });
         Assert.Equal(11m, Assert.Single(snapshot.Productions).TotalCost);
-        var consumptions = (await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!;
+        var consumptions = (await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!;
         Assert.Equal(new[] { small.Id, large.Id }, consumptions.Select(item => item.StockLotId));
         Assert.Equal(new[] { 200m, 100m }, consumptions.Select(item => item.Quantity));
         Assert.Equal(new[] { 8m, 3m }, consumptions.Select(item => item.Cost));
-        var remaining = Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        var remaining = Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
         Assert.Equal(large.Id, remaining.Id);
         Assert.Equal(400m, remaining.RemainingQty);
         Assert.Equal(500m, remaining.PackageQty);
@@ -381,7 +381,7 @@ public sealed class InventoryFlowTests
         var after = await Load(client);
         Assert.Equal(before.Revision, after.Revision);
         Assert.Empty(after.Productions);
-        Assert.Equal(1000, Assert.Single((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!).RemainingQty);
+        Assert.Equal(1000, Assert.Single((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!).RemainingQty);
         await host.WithDatabaseAsync(async db => Assert.Empty(await db.StockConsumptions.ToListAsync()));
     }
 
@@ -405,7 +405,7 @@ public sealed class InventoryFlowTests
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(before.Revision, (await Load(client)).Revision);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
     }
 
     [Fact]
@@ -427,7 +427,7 @@ public sealed class InventoryFlowTests
         var after = await Save(client, before with { Productions = [before.Productions[0] with { IngredientCostPerBatch = 100 }] });
         Assert.Null(after.Productions[0].TotalCost);
         Assert.Equal(7, after.Productions[0].IngredientCostPerBatch);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
         await host.WithDatabaseAsync(async db => Assert.Empty(await db.StockConsumptions.ToListAsync()));
     }
 
@@ -445,8 +445,8 @@ public sealed class InventoryFlowTests
         snapshot = await Save(client, snapshot with { Productions = [Production(quantity: 3)] });
         Assert.Equal(1m, snapshot.Productions[0].TotalCost);
         Assert.Equal(0.33333333m, snapshot.Productions[0].IngredientCostPerBatch);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockLotDto>>("/api/stock"))!);
-        Assert.Equal(1m, Assert.Single((await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!).Cost);
+        Assert.Empty((await client.GetPageItemsAsync<StockLotDto>("/api/stock"))!);
+        Assert.Equal(1m, Assert.Single((await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!).Cost);
     }
 
     [Fact]
@@ -464,7 +464,7 @@ public sealed class InventoryFlowTests
         Assert.Equal(10.16666667m, saved.IngredientCostPerBatch);
         Assert.Equal("Pão", saved.RecipeName);
         Assert.Equal(10, saved.YieldPerBatch);
-        Assert.Empty((await client.GetFromJsonAsync<List<StockConsumptionDto>>("/api/productions/production/consumptions"))!);
+        Assert.Empty((await client.GetPageItemsAsync<StockConsumptionDto>("/api/productions/production/consumptions"))!);
         await host.WithDatabaseAsync(async db => Assert.Empty(await db.StockConsumptions.ToListAsync()));
 
         snapshot = await Save(client, snapshot with { Productions = [saved with { TotalCost = 12m }] });

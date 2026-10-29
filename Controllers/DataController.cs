@@ -11,6 +11,13 @@ namespace ValoresReceitas.Api.Controllers;
 [Route("api/data")]
 public sealed class DataController(IDataService service) : ControllerBase, IDataController
 {
+    [HttpPatch]
+    [EndpointSummary("Salva alterações incrementais sem substituir registros não carregados.")]
+    public async Task<ActionResult<DataSnapshotDto>> Patch(WorkspacePatchDto patch, CancellationToken cancellationToken)
+    {
+        return Ok(await service.PatchAsync(patch, cancellationToken));
+    }
+
     [HttpGet]
     public async Task<ActionResult<DataSnapshotDto>> Get(CancellationToken cancellationToken)
     {

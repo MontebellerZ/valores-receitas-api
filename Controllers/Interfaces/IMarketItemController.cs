@@ -5,5 +5,5 @@ namespace ValoresReceitas.Api.Controllers.Interfaces;
 
 public interface IMarketItemController
 {
-    Task<ActionResult<List<MarketItemDto>>> Get(CancellationToken cancellationToken);
+    Task<ActionResult<PageDto<MarketItemDto>>> Get(PageQueryDto query, CancellationToken cancellationToken);
 }

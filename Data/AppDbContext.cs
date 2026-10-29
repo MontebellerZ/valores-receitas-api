@@ -31,6 +31,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.HasOne<AccountUser>().WithMany().HasForeignKey(item => item.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(item => item.UserId);
+            entity.HasIndex(item => new { item.UserId, item.Name, item.Id }).HasFilter("[IsDeleted] = 0");
         });
 
         modelBuilder.Entity<Recipe>(entity =>
@@ -45,6 +46,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.HasOne<AccountUser>().WithMany().HasForeignKey(recipe => recipe.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(recipe => recipe.UserId);
+            entity.HasIndex(recipe => new { recipe.UserId, recipe.Name, recipe.Id }).HasFilter("[IsDeleted] = 0");
         });
 
         modelBuilder.Entity<Ingredient>(entity =>
@@ -64,6 +66,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.HasIndex(ingredient => new { ingredient.RecipeId, ingredient.MarketItemId }).IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(ingredient => ingredient.UserId);
+            entity.HasIndex(ingredient => new { ingredient.UserId, ingredient.MarketItemId }).HasFilter("[IsDeleted] = 0");
         });
 
         modelBuilder.Entity<Production>(entity =>
@@ -86,6 +89,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.HasOne<AccountUser>().WithMany().HasForeignKey(production => production.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(production => production.UserId);
+            entity.HasIndex(production => new { production.UserId, production.Date, production.Id }).HasFilter("[IsDeleted] = 0");
         });
 
         modelBuilder.Entity<Sale>(entity =>
@@ -107,6 +111,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(sale => sale.ProductionId);
             entity.HasIndex(sale => sale.UserId);
+            entity.HasIndex(sale => new { sale.UserId, sale.Date, sale.Id }).HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(sale => new { sale.UserId, sale.ProductionId, sale.Date, sale.Id }).HasFilter("[IsDeleted] = 0");
         });
 
         modelBuilder.Entity<StockLot>(entity =>
@@ -125,6 +131,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.HasOne<MarketItem>().WithMany().HasForeignKey(item => item.MarketItemId).OnDelete(DeleteBehavior.Restrict);
             entity.HasQueryFilter(item => !item.IsDeleted);
             entity.HasIndex(item => new { item.UserId, item.MarketItemId, item.EntryDate, item.EntryOrder });
+            entity.HasIndex(item => new { item.UserId, item.EntryOrder, item.Id }).HasFilter("[IsDeleted] = 0");
         });
         modelBuilder.Entity<StockConsumption>(entity =>
         {

@@ -2,9 +2,106 @@
 @revision = 0
 @lotId = substitua-pelo-id-retornado
 @productionId = substitua-pelo-id-da-producao
+@recipeId = substitua-pelo-id-da-receita
+@marketItemId = substitua-pelo-id-do-insumo
 
 GET {{ValoresReceitas.Api_HostAddress}}/api/health
 Accept: application/json
+
+### Metadados e totais globais (requer login)
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/summary
+
+### Periodo do painel
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/summary?from=2026-10-01&to=2026-10-31
+
+### Insumos - busca e pagina no banco
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/market?page=2&pageSize=25&search=farinha&sortBy=name
+
+### Receitas - sem ingredientes aninhados na listagem
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/recipes?page=1&pageSize=10
+
+### Producao - historico paginado
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/productions?page=1&pageSize=50&sortBy=date&descending=true
+
+### Vendas de uma producao
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/sales?productionId={{productionId}}&page=1&pageSize=10
+
+### Estoque - inclui esgotados e metadados da compra completa
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/stock?page=1&pageSize=100&includeInactive=true
+
+### Saldos de producao disponiveis para venda
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/balances?available=true&pageSize=10
+
+### Totais de estoque por insumo
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/stock-totals?pageSize=10
+
+### Insumo especifico
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/market/{{marketItemId}}
+
+### Receita especifica para edicao
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/recipes/{{recipeId}}
+
+### Metadados sem carregar ingredientes
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/recipes/{{recipeId}}/metadata
+
+### Producao especifica
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/productions/{{productionId}}
+
+### Venda especifica (substitua o identificador)
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/sales/id-da-venda
+
+### Saldo de uma unica producao
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/balances/{{productionId}}
+
+### Ingredientes paginados
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/recipes/{{recipeId}}/ingredients?pageSize=25
+
+### Consumo FIFO paginado
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/productions/{{productionId}}/consumptions?pageSize=25
+
+### Relatorio completo com pagina de dias para o grafico
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/productions/{{productionId}}/report?pageSize=10
+
+### Validacao: tamanho nao permitido retorna 400
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/market?pageSize=1000
+
+### Detalhe inexistente retorna 404
+GET {{ValoresReceitas.Api_HostAddress}}/api/query/recipes/inexistente
+
+### Atualizacao incremental (arrays vazios nao excluem registros)
+PATCH {{ValoresReceitas.Api_HostAddress}}/api/data
+Content-Type: application/json
+
+{
+  "market": [{"id": "{{marketItemId}}", "name": "Farinha", "unit": "g"}],
+  "recipes": [],
+  "productions": [],
+  "sales": [],
+  "deleted": {"market": [], "recipes": [], "productions": [], "sales": []},
+  "revision": {{revision}}
+}
+
+### Edicao de receita sem remover ingredientes de outras paginas
+PATCH {{ValoresReceitas.Api_HostAddress}}/api/data
+Content-Type: application/json
+
+{
+  "market": [],
+  "recipes": [{
+    "id": "{{recipeId}}",
+    "name": "Bolo de cenoura",
+    "category": "Bolos",
+    "yield": 10,
+    "hoursPerBatch": 1,
+    "ingredients": []
+  }],
+  "productions": [],
+  "sales": [],
+  "deleted": {"market": [], "recipes": [], "productions": [], "sales": []},
+  "revision": {{revision}},
+  "partialRecipeIngredients": true,
+  "deletedIngredients": []
+}
 
 ###
 

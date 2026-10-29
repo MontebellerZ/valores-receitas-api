@@ -9,9 +9,9 @@ namespace ValoresReceitas.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/recipes")]
-public sealed class RecipeController(IRecipeService service) : ControllerBase, IRecipeController
+public sealed class RecipeController(IQueryService service) : ControllerBase, IRecipeController
 {
     [HttpGet]
-    public async Task<ActionResult<List<RecipeDto>>> Get(CancellationToken cancellationToken) =>
-        Ok(await service.ListAsync(cancellationToken));
+    public async Task<ActionResult<PageDto<RecipeDto>>> Get([FromQuery] PageQueryDto query, CancellationToken cancellationToken) =>
+        Ok(await service.RecipesAsync(query, cancellationToken));
 }

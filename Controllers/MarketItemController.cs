@@ -9,9 +9,9 @@ namespace ValoresReceitas.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/market")]
-public sealed class MarketItemController(IMarketItemService service) : ControllerBase, IMarketItemController
+public sealed class MarketItemController(IQueryService service) : ControllerBase, IMarketItemController
 {
     [HttpGet]
-    public async Task<ActionResult<List<MarketItemDto>>> Get(CancellationToken cancellationToken) =>
-        Ok(await service.ListAsync(cancellationToken));
+    public async Task<ActionResult<PageDto<MarketItemDto>>> Get([FromQuery] PageQueryDto query, CancellationToken cancellationToken) =>
+        Ok(await service.MarketAsync(query, cancellationToken));
 }

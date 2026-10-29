@@ -15,4 +15,5 @@ public sealed record SaleDto(
     [MaxLength(200)] string Customer,
     bool Paid,
     [MaxLength(2000)] string Notes,
-    bool Donated = false);
+    bool Donated = false,
+    double CumulativeRevenue = 0);

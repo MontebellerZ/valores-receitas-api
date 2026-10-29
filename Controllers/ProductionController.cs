@@ -9,13 +9,13 @@ namespace ValoresReceitas.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/productions")]
-public sealed class ProductionController(IProductionService service, IStockService stockService) : ControllerBase, IProductionController
+public sealed class ProductionController(IQueryService service) : ControllerBase, IProductionController
 {
     [HttpGet]
-    public async Task<ActionResult<List<ProductionDto>>> Get(CancellationToken cancellationToken) =>
-        Ok(await service.ListAsync(cancellationToken));
+    public async Task<ActionResult<PageDto<ProductionDto>>> Get([FromQuery] PageQueryDto query, CancellationToken cancellationToken) =>
+        Ok(await service.ProductionsAsync(query, cancellationToken));
 
     [HttpGet("{id}/consumptions")]
-    public async Task<ActionResult<List<StockConsumptionDto>>> Consumptions(string id, CancellationToken ct) =>
-        Ok(await stockService.ConsumptionsAsync(id, ct));
+    public async Task<ActionResult<PageDto<StockConsumptionDto>>> Consumptions(string id, [FromQuery] PageQueryDto query, CancellationToken ct) =>
+        Ok(await service.ConsumptionsAsync(id, query, ct));
 }
