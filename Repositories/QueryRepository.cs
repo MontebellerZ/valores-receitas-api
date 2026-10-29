@@ -204,6 +204,7 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
     {
         public required Production Production { get; init; }
         public int Sold { get; init; }
+        public int Donated { get; init; }
         public double Packages { get; init; }
         public double Available { get; init; }
         public double Cost { get; init; }
@@ -218,7 +219,8 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
     private IQueryable<BalanceRow> BalanceRows(string userId, PageQueryDto query)
     {
         var sold = Sales(userId).GroupBy(sale => sale.ProductionId)
-            .Select(group => new { Id = group.Key, Packages = (int?)group.Sum(item => item.Packages) });
+            .Select(group => new { Id = group.Key, Packages = (int?)group.Sum(item => item.Packages),
+                Donated = (int?)group.Sum(item => item.Donated ? item.Packages : 0) });
         var period = FilterSales(userId, query with { ProductionId = null, Search = null })
             .GroupBy(sale => sale.ProductionId).Select(group => new
             {
@@ -242,6 +244,7 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
                    {
                        Production = production,
                        Sold = total.Packages ?? 0,
+                       Donated = total.Donated ?? 0,
                        Packages = packages,
                        Available = unsold > 0 ? unsold : 0,
                        Cost = cost,
@@ -302,7 +305,7 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
         var page = await PageAsync(ordered.ThenBy(item => item.Production.Id), query, ct);
         var periodSales = await PeriodSalesAsync(userId, page.Items.Select(item => item.Production.Id).ToArray(), query, ct);
         return new(page.Items.Select(item => new ProductionBalanceDto(ToDto(item.Production), item.Sold, item.Packages, item.Available,
-            periodSales.GetValueOrDefault(item.Production.Id) ?? new(0, 0, 0, 0))).ToList(),
+            periodSales.GetValueOrDefault(item.Production.Id) ?? new(0, 0, 0, 0), item.Donated)).ToList(),
             page.Page, page.PageSize, page.TotalCount, page.TotalPages);
     }
 
@@ -409,6 +412,7 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
         {
             Count = group.Count(),
             Sold = group.Sum(item => item.Sold),
+            Donated = group.Sum(item => item.Donated),
             Losses = group.Sum(item => (double)item.Production.Losses),
             Available = group.Sum(item => item.Available),
             Produced = group.Sum(item => item.Packages),
@@ -423,7 +427,8 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
         return new(revision, counts, totals, production?.Available ?? 0, production?.Cost ?? 0, production?.Produced ?? 0, production?.Lost ?? 0,
             new(production?.Count ?? 0, production?.Sold ?? 0, production?.Losses ?? 0,
                 production?.RemainingRevenue ?? 0, production?.RemainingCost ?? 0, production?.ExpectedRevenue ?? 0,
-                production?.ReferenceRevenue ?? 0, (production?.ReferenceRevenue ?? 0) - (production?.Cost ?? 0)));
+                production?.ReferenceRevenue ?? 0, (production?.ReferenceRevenue ?? 0) - (production?.Cost ?? 0),
+                production?.Donated ?? 0));
     }
 
     public async Task<SalesReportDto> SalesReportAsync(string userId, PageQueryDto query, CancellationToken ct)

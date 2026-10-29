@@ -48,6 +48,12 @@ public sealed class ProductionBuyerTests
         var firstPage = (await client.GetFromJsonAsync<ProductionReportDto>(
             $"/api/query/productions/{production.Id}/report"))!;
         Assert.Equal(firstPage.TopBuyers, report.TopBuyers);
+        var balance = (await client.GetFromJsonAsync<ProductionBalanceDto>(
+            $"/api/query/balances/{production.Id}"))!;
+        Assert.Equal(1000, balance.DonatedPackages);
+        Assert.Equal(1052, balance.SoldPackages);
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        Assert.Equal(1000, summary.Productions.DonatedPackages);
         Assert.Equal(HttpStatusCode.NotFound,
             (await other.GetAsync($"/api/query/productions/{production.Id}/report")).StatusCode);
         using var anonymous = host.CreateClient();
