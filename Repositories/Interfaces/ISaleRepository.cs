@@ -6,6 +6,7 @@ namespace ValoresReceitas.Api.Repositories.Interfaces;
 public interface ISaleRepository
 {
     Task<List<SaleDto>> ListAsync(string userId, CancellationToken cancellationToken);
+    Task<List<SaleDto>> ListByIdsAsync(string userId, string[] ids, CancellationToken cancellationToken);
     Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken);
     Task DeleteOwnedAsync(string userId, CancellationToken cancellationToken);
     void AddRange(IEnumerable<Sale> sales);

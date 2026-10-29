@@ -20,10 +20,13 @@ public sealed class SaleService(ISaleRepository repository, ICurrentUserService 
             "Vendas doadas devem ter preco zero e nao podem ficar a receber.");
     }
 
-    public void ValidateReferences(IEnumerable<SaleDto> sales, IEnumerable<ProductionDto> productions)
+    public void ValidateReferences(IEnumerable<SaleDto> sales, IEnumerable<ProductionDto> productions,
+        IReadOnlyDictionary<string, decimal>? existingPackages = null)
     {
         var productionById = productions.ToDictionary(item => item.Id, StringComparer.Ordinal);
-        var soldPackages = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        var soldPackages = existingPackages is null
+            ? new Dictionary<string, decimal>(StringComparer.Ordinal)
+            : existingPackages.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         foreach (var sale in sales)
         {
             if (!productionById.TryGetValue(sale.ProductionId, out var production))

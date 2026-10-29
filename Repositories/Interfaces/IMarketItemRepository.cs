@@ -6,6 +6,7 @@ namespace ValoresReceitas.Api.Repositories.Interfaces;
 public interface IMarketItemRepository
 {
     Task<List<MarketItemDto>> ListAsync(string userId, CancellationToken cancellationToken);
+    Task<List<MarketItemDto>> ListByIdsAsync(string userId, string[] ids, CancellationToken cancellationToken);
     Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken);
     Task DeleteOwnedAsync(string userId, CancellationToken cancellationToken);
     void AddRange(IEnumerable<MarketItem> items);

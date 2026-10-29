@@ -130,19 +130,250 @@ public sealed class PaginationTests
         var first = (await client.GetFromJsonAsync<PageDto<MarketItemDto>>("/api/query/market"))!.Items[0];
         var patch = new WorkspacePatchDto([first with { Name = "Updated" }], [], [], [],
             new([], [], [], []), before.Revision);
+        host.CommandRecorder.Clear();
         var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
         response.EnsureSuccessStatusCode();
+        Assert.DoesNotContain(patchCommands, command =>
+            command.Contains("\"Recipes\"", StringComparison.Ordinal) ||
+            command.Contains("\"Ingredients\"", StringComparison.Ordinal) ||
+            command.Contains("\"Productions\"", StringComparison.Ordinal) ||
+            command.Contains("\"Sales\"", StringComparison.Ordinal));
         var saved = (await response.Content.ReadFromJsonAsync<DataSnapshotDto>())!;
         Assert.Single(saved.Market);
         Assert.Empty(saved.Recipes);
         Assert.Empty(saved.Productions);
         Assert.Empty(saved.Sales);
         Assert.Equal(before.Revision + 1, saved.Revision);
+        Assert.True(saved.Market[0].HasStockHistory);
         var after = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
         Assert.Equal(before.Counts, after.Counts);
         Assert.Equal("Updated", (await client.GetFromJsonAsync<MarketItemDto>($"/api/query/market/{first.Id}"))!.Name);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsJsonAsync("/api/data", patch)).StatusCode);
         Assert.Equal("Updated", (await client.GetFromJsonAsync<MarketItemDto>($"/api/query/market/{first.Id}"))!.Name);
+    }
+
+    [Fact]
+    public async Task EmptyPatchReturnsNoChangedRecordsAndLeavesWorkspaceDataUnchanged()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("empty-patch@example.test");
+        await SeedAsync(host, "empty-patch@example.test", 1);
+        var before = (await client.GetFromJsonAsync<DataSnapshotDto>("/api/data"))!;
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var patch = new WorkspacePatchDto([], [], [], [], new([], [], [], []), summary.Revision);
+
+        host.CommandRecorder.Clear();
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
+        response.EnsureSuccessStatusCode();
+        var saved = (await response.Content.ReadFromJsonAsync<DataSnapshotDto>())!;
+
+        Assert.DoesNotContain(patchCommands, command =>
+            command.Contains("\"MarketItems\"", StringComparison.Ordinal) ||
+            command.Contains("\"Recipes\"", StringComparison.Ordinal) ||
+            command.Contains("\"Ingredients\"", StringComparison.Ordinal) ||
+            command.Contains("\"Productions\"", StringComparison.Ordinal) ||
+            command.Contains("\"Sales\"", StringComparison.Ordinal) ||
+            command.Contains("\"StockLots\"", StringComparison.Ordinal));
+        Assert.Empty(saved.Market);
+        Assert.Empty(saved.Recipes);
+        Assert.Empty(saved.Productions);
+        Assert.Empty(saved.Sales);
+        Assert.Equal(summary.Revision + 1, saved.Revision);
+        var after = (await client.GetFromJsonAsync<DataSnapshotDto>("/api/data"))!;
+        Assert.Equal(before.Market.Select(item => item.Id), after.Market.Select(item => item.Id));
+        Assert.Equal(before.Recipes.Select(item => item.Id), after.Recipes.Select(item => item.Id));
+        Assert.Equal(before.Productions.Select(item => item.Id), after.Productions.Select(item => item.Id));
+        Assert.Equal(before.Sales.Select(item => item.Id), after.Sales.Select(item => item.Id));
+    }
+
+    [Fact]
+    public async Task MarketOnlyPatchRejectsUnitChangesForItemsWithStockHistory()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("patch-stock-history@example.test");
+        await SeedAsync(host, "patch-stock-history@example.test", 1);
+        var item = (await client.GetFromJsonAsync<PageDto<MarketItemDto>>("/api/query/market"))!.Items.Single();
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var patch = new WorkspacePatchDto(
+            [item with { Unit = "g" }], [], [], [], new([], [], [], []), summary.Revision);
+
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(summary.Revision, (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!.Revision);
+        Assert.Equal("kg", (await client.GetFromJsonAsync<MarketItemDto>($"/api/query/market/{item.Id}"))!.Unit);
+    }
+
+    [Fact]
+    public async Task SaleOnlyPatchUpdatesOneSaleWithoutReadingCatalogTables()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("sale-patch@example.test");
+        await SeedAsync(host, "sale-patch@example.test", 1);
+        var sale = (await client.GetFromJsonAsync<PageDto<SaleDto>>("/api/query/sales"))!.Items.Single();
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var patch = new WorkspacePatchDto([], [], [], [sale with { PricePerPackage = 7 }],
+            new([], [], [], []), summary.Revision);
+
+        host.CommandRecorder.Clear();
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
+        response.EnsureSuccessStatusCode();
+        var saved = (await response.Content.ReadFromJsonAsync<DataSnapshotDto>())!;
+
+        Assert.Single(saved.Sales);
+        Assert.Equal(7, saved.Sales[0].PricePerPackage);
+        Assert.Equal(sale.CostPerPackage, saved.Sales[0].CostPerPackage);
+        Assert.DoesNotContain(patchCommands, command =>
+            command.Contains("\"MarketItems\"", StringComparison.Ordinal) ||
+            command.Contains("\"Recipes\"", StringComparison.Ordinal) ||
+            command.Contains("\"Ingredients\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SaleOnlyPatchUsesAggregatedExistingPackagesForCapacityValidation()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("sale-capacity-patch@example.test");
+        await SeedAsync(host, "sale-capacity-patch@example.test", 1);
+        var sale = (await client.GetFromJsonAsync<PageDto<SaleDto>>("/api/query/sales"))!.Items.Single();
+        await host.WithDatabaseAsync(async db =>
+        {
+            var userId = await db.Users.Where(user => user.Email == "sale-capacity-patch@example.test")
+                .Select(user => user.Id).SingleAsync();
+            db.Sales.AddRange(Enumerable.Range(0, 8).Select(index => new Sale
+            {
+                Id = $"additional-sale-{index}", UserId = userId, ProductionId = sale.ProductionId,
+                ProductionDate = sale.ProductionDate, RecipeName = sale.RecipeName, Date = sale.Date,
+                Packages = 1, PricePerPackage = 5, CostPerPackage = sale.CostPerPackage,
+                Customer = "Cliente", Paid = true, Notes = "",
+            }));
+            await db.SaveChangesAsync();
+        });
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var patch = new WorkspacePatchDto([], [], [], [sale with { Packages = 2 }],
+            new([], [], [], []), summary.Revision);
+
+        host.CommandRecorder.Clear();
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(patchCommands, command =>
+            command.Contains("\"Sales\"", StringComparison.Ordinal) &&
+            command.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(summary.Revision, (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!.Revision);
+        Assert.Equal(1, (await client.GetFromJsonAsync<SaleDto>($"/api/query/sales/{sale.Id}"))!.Packages);
+    }
+
+    [Fact]
+    public async Task NewProductionAndSalePatchConsumesStockOnceAndUsesScopedReads()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("new-production-patch@example.test");
+        await SeedAsync(host, "new-production-patch@example.test", 1);
+        var recipe = (await client.GetFromJsonAsync<PageDto<RecipeDto>>("/api/query/recipes"))!.Items.Single();
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var productionId = "new-production";
+        var productionDate = new DateOnly(2026, 10, 3);
+        var production = new ProductionDto(productionId, productionDate, recipe.Id, recipe.Name, 1, 10, 0,
+            0, 1, recipe.Yield, 0, null);
+        var sale = new SaleDto("new-sale", productionId, productionDate, recipe.Name,
+            productionDate.AddDays(1), 1, 5, 0, "Cliente", true, "");
+        var patch = new WorkspacePatchDto([], [], [production], [sale],
+            new([], [], [], []), summary.Revision);
+
+        host.CommandRecorder.Clear();
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
+        response.EnsureSuccessStatusCode();
+        var saved = (await response.Content.ReadFromJsonAsync<DataSnapshotDto>())!;
+
+        Assert.Single(saved.Productions);
+        Assert.Equal(2, saved.Productions[0].TotalCost);
+        Assert.Single(saved.Sales);
+        Assert.Equal(0.2m, saved.Sales[0].CostPerPackage);
+        Assert.DoesNotContain(patchCommands, command => command.Contains("\"MarketItems\"", StringComparison.Ordinal));
+        await host.WithDatabaseAsync(async db =>
+        {
+            var userId = await db.Users.Where(user => user.Email == "new-production-patch@example.test")
+                .Select(user => user.Id).SingleAsync();
+            Assert.Equal(4, await db.StockLots.Where(lot => lot.UserId == userId).Select(lot => lot.RemainingQty).SingleAsync());
+            Assert.Single(await db.StockConsumptions.Where(item => item.ProductionId == productionId).ToListAsync());
+        });
+    }
+
+    [Fact]
+    public async Task ProductionOnlyPatchRefreshesRelatedSaleMetadataWithoutReadingCatalogTables()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("production-patch@example.test");
+        await SeedAsync(host, "production-patch@example.test", 1);
+        var production = (await client.GetFromJsonAsync<PageDto<ProductionDto>>("/api/query/productions"))!.Items.Single();
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var patch = new WorkspacePatchDto([], [], [production with { Date = production.Date.AddDays(1) }],
+            [], new([], [], [], []), summary.Revision);
+
+        host.CommandRecorder.Clear();
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
+        response.EnsureSuccessStatusCode();
+        var saved = (await response.Content.ReadFromJsonAsync<DataSnapshotDto>())!;
+
+        Assert.Single(saved.Productions);
+        Assert.Empty(saved.Sales);
+        var sale = (await client.GetFromJsonAsync<PageDto<SaleDto>>("/api/query/sales"))!.Items.Single();
+        Assert.Equal(production.Date.AddDays(1), sale.ProductionDate);
+        Assert.DoesNotContain(patchCommands, command =>
+            command.Contains("\"MarketItems\"", StringComparison.Ordinal) ||
+            command.Contains("\"Recipes\"", StringComparison.Ordinal) ||
+            command.Contains("\"Ingredients\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FailedNewProductionPatchRollsBackStockAndRevision()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("failed-production-patch@example.test");
+        await SeedAsync(host, "failed-production-patch@example.test", 1);
+        var recipe = (await client.GetFromJsonAsync<PageDto<RecipeDto>>("/api/query/recipes"))!.Items.Single();
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var production = new ProductionDto("insufficient-production", new DateOnly(2026, 10, 3),
+            recipe.Id, recipe.Name, 10, 100, 0, 0, 1, recipe.Yield, 0, null);
+        var patch = new WorkspacePatchDto([], [], [production], [], new([], [], [], []), summary.Revision);
+
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(summary.Revision, (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!.Revision);
+        Assert.Equal(1, (await client.GetFromJsonAsync<PageDto<ProductionDto>>("/api/query/productions"))!.TotalCount);
+        await host.WithDatabaseAsync(async db =>
+        {
+            var userId = await db.Users.Where(user => user.Email == "failed-production-patch@example.test")
+                .Select(user => user.Id).SingleAsync();
+            Assert.Equal(5, await db.StockLots.Where(lot => lot.UserId == userId).Select(lot => lot.RemainingQty).SingleAsync());
+            Assert.Empty(await db.StockConsumptions.Where(item => item.ProductionId == production.Id).ToListAsync());
+        });
+    }
+
+    [Fact]
+    public async Task SavedProductionPatchCannotChangeItsRecipeOrQuantity()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = await host.CreateUserAsync("immutable-production-patch@example.test");
+        await SeedAsync(host, "immutable-production-patch@example.test", 1);
+        var production = (await client.GetFromJsonAsync<PageDto<ProductionDto>>("/api/query/productions"))!.Items.Single();
+        var summary = (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!;
+        var patch = new WorkspacePatchDto([], [], [production with { Quantity = 2 }],
+            [], new([], [], [], []), summary.Revision);
+
+        using var response = await client.PatchAsJsonAsync("/api/data", patch);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(summary.Revision, (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!.Revision);
+        Assert.Equal(1, (await client.GetFromJsonAsync<PageDto<ProductionDto>>("/api/query/productions"))!.Items.Single().Quantity);
     }
 
     [Fact]
@@ -243,8 +474,13 @@ public sealed class PaginationTests
         var patch = new WorkspacePatchDto([], [metadata with { Name = "Renamed", Ingredients = [page.Items[0] with { Quantity = 7 }] }],
             [], [], new([], [], [], []), summary.Revision, PartialRecipeIngredients: true,
             DeletedIngredients: [page.Items[1].Id]);
+        host.CommandRecorder.Clear();
         using var response = await client.PatchAsJsonAsync("/api/data", patch);
+        var patchCommands = host.CommandRecorder.Commands;
         response.EnsureSuccessStatusCode();
+        Assert.DoesNotContain(patchCommands, command =>
+            command.Contains("\"Productions\"", StringComparison.Ordinal) ||
+            command.Contains("\"Sales\"", StringComparison.Ordinal));
         var saved = (await response.Content.ReadFromJsonAsync<DataSnapshotDto>())!;
         Assert.Single(saved.Recipes[0].Ingredients);
         Assert.Equal(7, saved.Recipes[0].Ingredients[0].Quantity);
@@ -335,6 +571,12 @@ public sealed class PaginationTests
         Assert.Equal(11, after.Counts.Sales);
         Assert.Equal(12, after.Counts.Productions);
         Assert.Equal(12 * 8 + 1, after.AvailablePackages);
+        var foreignMarket = (await other.GetFromJsonAsync<PageDto<MarketItemDto>>("/api/query/market"))!.Items[0];
+        var foreignMarketPatch = new WorkspacePatchDto([foreignMarket with { Name = "Stolen" }], [], [], [],
+            new([], [], [], []), after.Revision);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsJsonAsync("/api/data", foreignMarketPatch)).StatusCode);
+        Assert.Equal(after.Revision, (await client.GetFromJsonAsync<WorkspaceSummaryDto>("/api/query/summary"))!.Revision);
+
         var foreignPatch = patch with
         {
             Sales = [foreign with { ProductionId = sales.Items[1].ProductionId }],

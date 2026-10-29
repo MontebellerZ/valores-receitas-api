@@ -11,10 +11,20 @@ public sealed class ProductionRepository(AppDbContext context) : IProductionRepo
     public Task<List<ProductionDto>> ListAsync(string userId, CancellationToken cancellationToken) =>
         context.Productions.AsNoTracking().Where(item => item.UserId == userId)
             .OrderByDescending(item => item.Date)
-            .Select(item => new ProductionDto(item.Id, item.Date, item.RecipeId, item.RecipeName,
-                item.Quantity, item.ActualYield, item.Losses, item.Margin, item.PackageQty,
-                item.YieldPerBatch, item.IngredientCostPerBatch, item.ExpectedSalePrice, item.TotalCost, item.IsStandalone, item.LostPackages))
+            .Select(ToDto)
             .ToListAsync(cancellationToken);
+
+    public Task<List<ProductionDto>> ListByIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
+        context.Productions.AsNoTracking().Where(item => item.UserId == userId && ids.Contains(item.Id))
+            .OrderByDescending(item => item.Date)
+            .Select(ToDto)
+            .ToListAsync(cancellationToken);
+
+    private static System.Linq.Expressions.Expression<Func<Production, ProductionDto>> ToDto => item =>
+        new ProductionDto(item.Id, item.Date, item.RecipeId, item.RecipeName,
+            item.Quantity, item.ActualYield, item.Losses, item.Margin, item.PackageQty,
+            item.YieldPerBatch, item.IngredientCostPerBatch, item.ExpectedSalePrice,
+            item.TotalCost, item.IsStandalone, item.LostPackages);
 
     public Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
         context.Productions.IgnoreQueryFilters().AnyAsync(item => item.UserId != userId && ids.Contains(item.Id), cancellationToken);

@@ -15,6 +15,13 @@ public sealed class MarketItemRepository(AppDbContext context) : IMarketItemRepo
                 context.StockLots.Any(lot => lot.MarketItemId == item.Id && lot.UserId == userId)))
             .ToListAsync(cancellationToken);
 
+    public Task<List<MarketItemDto>> ListByIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
+        context.MarketItems.AsNoTracking().Where(item => item.UserId == userId && ids.Contains(item.Id))
+            .OrderBy(item => item.Name)
+            .Select(item => new MarketItemDto(item.Id, item.Name, item.Unit,
+                context.StockLots.Any(lot => lot.MarketItemId == item.Id && lot.UserId == userId)))
+            .ToListAsync(cancellationToken);
+
     public Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
         context.MarketItems.IgnoreQueryFilters().AnyAsync(item => item.UserId != userId && ids.Contains(item.Id), cancellationToken);
 

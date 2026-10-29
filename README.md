@@ -5,12 +5,14 @@ API ASP.NET Core 10 para o Conta de Chef. Os dados são persistidos no SQL Serve
 ## Configuração e execução
 
 1. Instale o .NET 10 SDK e deixe o SQL Server acessível em `localhost`.
-2. Configure a conexão em `appsettings.json`. O arquivo local já está preenchido para o ambiente informado e é ignorado pelo Git. Para outros ambientes, use `ConnectionStrings__DefaultConnection` como variável de ambiente.
-3. Configure `Email:Host`, `Email:Port`, `Email:UserName`, `Email:Password` e `Email:FromAddress` com os dados do seu provedor SMTP. O link de confirmação retorna para `Frontend:BaseUrl`.
-4. Execute `dotnet run` nesta pasta. As migrations do EF Core são aplicadas automaticamente e a API fica disponível em `http://localhost:5232`.
-5. Em outro terminal, inicie o front com `npm run dev` dentro de `valores-receitas-front`. O Vite encaminha `/api` para esta API.
+2. Configure `ConnectionStrings__DefaultConnection` como variável de ambiente; para desenvolvimento local, use um `appsettings.json` não versionado.
+3. Configure `Email__Host`, `Email__Port`, `Email__UserName`, `Email__Password` e `Email__FromAddress` com os dados do seu provedor SMTP. O link de confirmação retorna para `Frontend:BaseUrl`.
+4. Execute `dotnet run` nesta pasta. Em desenvolvimento, as migrations do EF Core são aplicadas automaticamente e a API fica disponível em `http://localhost:5232`.
+5. Em outro terminal, inicie o front com `npm run dev` dentro de `valores-receitas-front`. O Vite fica em `http://localhost:5174`; o Axios acessa a API diretamente, e o CORS da API permite essa origem.
 
-O arquivo `appsettings.example.json` contém o formato de configuração sem a senha local.
+O arquivo `appsettings.example.json` contém o formato de configuração. Configure segredos SMTP e de banco por variáveis de ambiente em produção.
+
+Em produção, a API não aplica migrations durante o startup por padrão. Antes de publicar uma versão com alterações de banco, execute `dotnet ef database update` com a connection string de produção configurada, e então implante/escale a API. Configure `Database__ApplyMigrationsOnStartup=true` somente se a implantação garantir uma única instância migradora.
 
 ## Organizacao
 
@@ -31,7 +33,7 @@ Cada controller, service e repository possui um contrato proprio, em um arquivo 
 
 Os modulos de insumos, estoque, receitas, ingredientes, producoes e vendas possuem controllers e services. O nome interno `MarketItem` e a rota `api/market` foram preservados para compatibilidade. O modulo de usuario conserva as rotas `api/auth`.
 
-`UnitOfWork` compartilha a transacao entre repositories, com isolamento serializavel e rollback em caso de falha. `WorkspaceRepository` reconcilia os cadastros sem apagar e recriar todo o workspace. A revisao por usuario serializa alteracoes de estoque e rejeita gravacoes obsoletas com HTTP 409. `DatabaseRepository` concentra conectividade e migrations. Todos os repositories e services de negocio sao registrados com escopo por requisicao.
+`UnitOfWork` compartilha a transacao entre repositories, com isolamento serializavel e rollback em caso de falha. `WorkspaceRepository` reconcilia os cadastros sem apagar e recriar todo o workspace. A revisao por usuario serializa alteracoes de estoque e rejeita gravacoes obsoletas com HTTP 409. `DatabaseRepository` concentra conectividade e migrations. Login, cadastro, confirmação e reenvio de email têm limites de requisição por IP em cada instância da API; atrás de proxy, configure encaminhamento de IP confiável antes de expor a aplicação. Todos os repositories e services de negocio sao registrados com escopo por requisicao.
 
 ## Endpoints
 
@@ -41,7 +43,7 @@ Os modulos de insumos, estoque, receitas, ingredientes, producoes e vendas possu
 - `POST /api/auth/resend-confirmation`: reenvia o email de confirmação.
 - `POST /api/auth/login`, `POST /api/auth/logout` e `GET /api/auth/session`: controlam a sessão protegida por cookie HttpOnly.
 - `GET /api/data`: snapshot completo do usuário autenticado, reservado à exportação/importação explícita; não deve ser usado para abrir telas ou paginar.
-- `PATCH /api/data`: salva somente registros alterados e IDs explicitamente excluídos. Recebe `market`, `recipes`, `productions`, `sales`, `deleted: {market, recipes, productions, sales}` (todos arrays, mesmo vazios) e `revision`. Retorna apenas os registros alterados canônicos e a nova revisão. Registros não carregados permanecem intactos; validação, estoque FIFO e revisão continuam atômicos.
+- `PATCH /api/data`: salva somente registros alterados e IDs explicitamente excluídos. Recebe `market`, `recipes`, `productions`, `sales`, `deleted: {market, recipes, productions, sales}` (todos arrays, mesmo vazios) e `revision`. Retorna apenas os registros alterados canônicos e a nova revisão. Registros não carregados permanecem intactos; validação, estoque FIFO e revisão continuam atômicos. Patches vazios e alterações isoladas de insumos, receitas, produções ou vendas usam leituras e gravações limitadas aos dados afetados; patches que combinam categorias ou incluem exclusões ainda usam a reconciliação completa por compatibilidade.
 - `PUT /api/data`: reconcilia os dados e retorna o snapshot canonico (HTTP 200), incluindo `revision`, custos calculados pelo servidor e saldos de venda.
 - `GET /api/market`: consulta nome e unidade dos insumos; `hasStockHistory` impede exclusao e mudanca de unidade de itens com historico.
 - `GET /api/stock`: página de lotes ativos, ordenados por ordem de entrada decrescente e ID.
@@ -90,17 +92,17 @@ Todas as rotas de listagem retornam `{items, page, pageSize, totalCount, totalPa
 
 `QueryController` traduz HTTP; `QueryService` aplica o usuário atual; `QueryRepository` concentra filtros, projeções, agregações e limites SQL. A API nunca recebe um nome arbitrário de coluna para interpolar em SQL.
 
-A migração `AddPaginationIndexes` adiciona índices filtrados para usuário/nome/ID, usuário/data/ID, vendas por produção, estoque por compra e referências de insumos. Ela é aplicada no início da API, sem alterar os registros existentes.
+A migração `AddPaginationIndexes` adiciona índices filtrados para usuário/nome/ID, usuário/data/ID, vendas por produção, estoque por compra e referências de insumos. Em desenvolvimento, ela é aplicada no início da API; em produção, aplique-a como etapa única anterior ao rollout.
 
-Os testes de paginação usam SQLite relacional por padrão. Para verificar a tradução e execução das consultas no SQL Server configurado localmente, sem gravar dados, execute em PowerShell:
+Os testes de paginação usam SQLite relacional por padrão. A integração SQL Server cria um banco temporário exclusivo, semeia registros de teste e o remove ao terminar. Configure uma connection string de uma instância descartável e execute em PowerShell:
 
 ```powershell
-$env:VALORES_TEST_SQLSERVER_READONLY = "1"
+$env:VALORES_TEST_SQLSERVER = "Server=localhost;Database=master;User Id=sa;Password=<senha-de-teste>;Encrypt=True;TrustServerCertificate=True"
 dotnet test Tests\ValoresReceitas.Api.Tests.csproj --filter FullyQualifiedName~SqlServerQueryTests
-Remove-Item Env:\VALORES_TEST_SQLSERVER_READONLY
+Remove-Item Env:\VALORES_TEST_SQLSERVER
 ```
 
-Esse teste é opt-in, somente leitura, exige o banco migrado e ao menos uma conta existente. Usa a configuração local sem registrar a conexão ou dados dos usuários. Os testes de escrita e falhas continuam exclusivamente no SQLite isolado.
+Esse teste é opt-in e exige permissão para criar e remover apenas o banco temporário gerado para a execução. Nunca aponte a connection string a um banco de produção. O workflow de CI executa essa validação contra um SQL Server isolado.
 
 Para validar a interface sem alterar o banco da aplicação, `BrowserFixtureTests` oferece uma API temporária real em `127.0.0.1:5232`, com SQLite em memória e 113 registros por módulo, incluindo uma receita com 32 ingredientes e uma produção com 32 vendas:
 
@@ -152,6 +154,8 @@ Na raiz do workspace:
 ```powershell
 dotnet test .\valores-receitas-api\Tests\ValoresReceitas.Api.Tests.csproj
 ```
+
+O workflow `.github/workflows/ci.yml` executa testes e validações do frontend e da API; o job da API usa um SQL Server isolado para verificar as consultas específicas do provedor. A senha fixa desse container é apenas descartável para o serviço de CI, nunca deve ser reutilizada fora dele.
 
 A suite usa xUnit/VSTest, TestServer, SQLite em memoria e envio de email simulado. Executa os controllers, services, repositories e autenticacao por cookie reais sem acessar o SQL Server ou SMTP locais. Cobre sincronizacao, consultas por modulo, DTOs, categoria vazia, validacoes, isolamento entre contas, conflitos de identificadores, rollback, cadastro, confirmacao, sessao, bloqueio e falhas de email. Tambem verifica os limites das camadas e compara o modelo SQL Server com as migrations sem abrir conexao.
 

@@ -6,8 +6,11 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Data.Common;
 using ValoresReceitas.Api.Controllers;
 using ValoresReceitas.Api.Data;
 using ValoresReceitas.Api.DTOs;
@@ -19,12 +22,14 @@ using Xunit;
 
 namespace ValoresReceitas.Api.Tests;
 
-internal sealed class ApiTestHost(WebApplication app, SqliteConnection connection, bool browser = false, int browserPort = 5232) : IAsyncDisposable
+internal sealed class ApiTestHost(WebApplication app, SqliteConnection connection, TestDbCommandRecorder commandRecorder,
+    bool browser = false, int browserPort = 5232) : IAsyncDisposable
 {
     public const string Password = "Test-only.123";
     public TestEmailSender EmailSender => app.Services.GetRequiredService<TestEmailSender>();
+    public TestDbCommandRecorder CommandRecorder => commandRecorder;
 
-    public static async Task<ApiTestHost> CreateAsync(bool browser = false, int browserPort = 5232)
+    public static async Task<ApiTestHost> CreateAsync(bool browser = false, int browserPort = 5232, int loginRateLimit = 10)
     {
         var connection = new SqliteConnection(browser
             ? $"Data Source=BrowserFixture_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
@@ -38,14 +43,16 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole().SetMinimumLevel(LogLevel.Error);
         builder.Logging.AddFilter((_, level) => level >= LogLevel.Error);
+        var commandRecorder = new TestDbCommandRecorder();
         builder.Services.AddControllers().AddApplicationPart(typeof(DataController).Assembly);
-        builder.Services.AddApplicationServices();
+        builder.Services.AddApplicationServices(loginRateLimit);
         builder.Services.AddProblemDetails();
         builder.Services.AddExceptionHandler<ServiceExceptionHandler>();
         builder.Services.AddDbContext<AppDbContext>(options =>
         {
             if (browser) options.UseSqlite(connection.ConnectionString);
             else options.UseSqlite(connection);
+            options.AddInterceptors(commandRecorder);
         });
         builder.Services.AddIdentityCore<AccountUser>(options =>
         {
@@ -71,7 +78,9 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
         builder.Services.AddSingleton<IEmailSender<AccountUser>>(provider => provider.GetRequiredService<TestEmailSender>());
         var app = builder.Build();
         app.UseExceptionHandler();
+        app.UseRouting();
         if (browser) app.UseCors();
+        app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
@@ -80,7 +89,7 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
             await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreatedAsync();
         }
         await app.StartAsync();
-        return new ApiTestHost(app, connection, browser, browserPort);
+        return new ApiTestHost(app, connection, commandRecorder, browser, browserPort);
     }
 
     public HttpClient CreateClient() => browser
@@ -128,6 +137,60 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
     {
         await app.DisposeAsync();
         await connection.DisposeAsync();
+    }
+}
+
+internal sealed class TestDbCommandRecorder : DbCommandInterceptor
+{
+    private readonly ConcurrentQueue<string> commands = new();
+
+    public string[] Commands => commands.ToArray();
+
+    public void Clear()
+    {
+        while (commands.TryDequeue(out _)) { }
+    }
+
+    public override InterceptionResult<DbDataReader> ReaderExecuting(DbCommand command, CommandEventData eventData,
+        InterceptionResult<DbDataReader> result)
+    {
+        commands.Enqueue(command.CommandText);
+        return result;
+    }
+
+    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+        CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+    {
+        commands.Enqueue(command.CommandText);
+        return ValueTask.FromResult(result);
+    }
+
+    public override InterceptionResult<int> NonQueryExecuting(DbCommand command, CommandEventData eventData,
+        InterceptionResult<int> result)
+    {
+        commands.Enqueue(command.CommandText);
+        return result;
+    }
+
+    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
+        CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+    {
+        commands.Enqueue(command.CommandText);
+        return ValueTask.FromResult(result);
+    }
+
+    public override InterceptionResult<object> ScalarExecuting(DbCommand command, CommandEventData eventData,
+        InterceptionResult<object> result)
+    {
+        commands.Enqueue(command.CommandText);
+        return result;
+    }
+
+    public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(DbCommand command,
+        CommandEventData eventData, InterceptionResult<object> result, CancellationToken cancellationToken = default)
+    {
+        commands.Enqueue(command.CommandText);
+        return ValueTask.FromResult(result);
     }
 }
 

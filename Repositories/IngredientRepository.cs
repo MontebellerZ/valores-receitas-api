@@ -18,6 +18,10 @@ public sealed class IngredientRepository(AppDbContext context) : IIngredientRepo
     public Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
         context.Ingredients.IgnoreQueryFilters().AnyAsync(item => item.UserId != userId && ids.Contains(item.Id), cancellationToken);
 
+    public Task<bool> HasOwnedIdsOutsideRecipesAsync(string userId, string[] ids, string[] recipeIds, CancellationToken cancellationToken) =>
+        context.Ingredients.Where(item => item.UserId == userId && ids.Contains(item.Id) && !recipeIds.Contains(item.RecipeId))
+            .AnyAsync(cancellationToken);
+
     public Task DeleteOwnedAsync(string userId, CancellationToken cancellationToken) =>
         context.Ingredients.Where(item => item.UserId == userId).ExecuteUpdateAsync(update => update.SetProperty(entity => entity.IsDeleted, true), cancellationToken);
 

@@ -11,10 +11,19 @@ public sealed class SaleRepository(AppDbContext context) : ISaleRepository
     public Task<List<SaleDto>> ListAsync(string userId, CancellationToken cancellationToken) =>
         context.Sales.AsNoTracking().Where(item => item.UserId == userId)
             .OrderByDescending(item => item.Date)
-            .Select(item => new SaleDto(item.Id, item.ProductionId, item.ProductionDate, item.RecipeName,
-                item.Date, item.Packages, item.PricePerPackage, item.CostPerPackage,
-                item.Customer, item.Paid, item.Notes, item.Donated))
+            .Select(ToDto)
             .ToListAsync(cancellationToken);
+
+    public Task<List<SaleDto>> ListByIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
+        context.Sales.AsNoTracking().Where(item => item.UserId == userId && ids.Contains(item.Id))
+            .OrderByDescending(item => item.Date)
+            .Select(ToDto)
+            .ToListAsync(cancellationToken);
+
+    private static System.Linq.Expressions.Expression<Func<Sale, SaleDto>> ToDto => item =>
+        new SaleDto(item.Id, item.ProductionId, item.ProductionDate, item.RecipeName,
+            item.Date, item.Packages, item.PricePerPackage, item.CostPerPackage,
+            item.Customer, item.Paid, item.Notes, item.Donated);
 
     public Task<bool> HasForeignIdsAsync(string userId, string[] ids, CancellationToken cancellationToken) =>
         context.Sales.IgnoreQueryFilters().AnyAsync(item => item.UserId != userId && ids.Contains(item.Id), cancellationToken);

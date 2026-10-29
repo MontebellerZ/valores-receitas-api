@@ -284,11 +284,48 @@ public sealed class ApiFlowTests
             });
             Assert.Equal(attempt == 5 ? (HttpStatusCode)423 : HttpStatusCode.Unauthorized, response.StatusCode);
         }
+
         using var locked = await client.PostAsJsonAsync("/api/auth/login", new LoginRequestDto
         {
             Email = "locked@example.test", Password = ApiTestHost.Password,
         });
         Assert.Equal((HttpStatusCode)423, locked.StatusCode);
+    }
+
+    [Fact]
+    public async Task LoginRateLimitReturnsProblemDetailsAndRetryAfter()
+    {
+        await using var host = await ApiTestHost.CreateAsync(loginRateLimit: 1);
+        using var client = host.CreateClient();
+        using var first = await client.PostAsJsonAsync("/api/auth/login", new LoginRequestDto
+        {
+            Email = "missing@example.test", Password = ApiTestHost.Password,
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
+
+        using var limited = await client.PostAsJsonAsync("/api/auth/login", new LoginRequestDto
+        {
+            Email = "missing@example.test", Password = ApiTestHost.Password,
+        });
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.True(limited.Headers.Contains("Retry-After"));
+        var problem = await limited.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal(429, problem!.Status);
+    }
+
+    [Fact]
+    public async Task RegistrationRequiresAtLeastTwelvePasswordCharacters()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        using var client = host.CreateClient();
+        using var response = await client.PostAsJsonAsync("/api/auth/register", new RegisterRequestDto
+        {
+            Email = "short-password@example.test",
+            Password = "Short7!",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Contains(problem!.Errors.Keys, key => key.Contains("Password", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

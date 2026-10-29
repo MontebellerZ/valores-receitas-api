@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using ValoresReceitas.Api.Settings;
 using Scalar.AspNetCore;
 using ValoresReceitas.Api.Data;
@@ -29,7 +30,7 @@ builder.Services.AddIdentityCore<AccountUser>(options =>
 {
     options.User.RequireUniqueEmail = true;
     options.SignIn.RequireConfirmedEmail = true;
-    options.Password.RequiredLength = 6;
+    options.Password.RequiredLength = 12;
     options.Password.RequireDigit = true;
     options.Password.RequireUppercase = true;
     options.Password.RequireLowercase = true;
@@ -79,6 +80,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseExceptionHandler();
+app.UseRouting();
 app.UseCors();
 
 if (crossSiteCookies)
@@ -105,13 +107,16 @@ if (crossSiteCookies)
     });
 }
 
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
-await using (var scope = app.Services.CreateAsyncScope())
+if (app.Environment.IsDevelopment() ||
+    builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
 {
+    await using var scope = app.Services.CreateAsyncScope();
     var database = scope.ServiceProvider.GetRequiredService<IDatabaseRepository>();
     await database.MigrateAsync();
 }
