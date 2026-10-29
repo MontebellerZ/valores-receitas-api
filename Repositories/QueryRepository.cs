@@ -140,6 +140,9 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
         if (query.ProductionId is not null) items = items.Where(item => item.ProductionId == query.ProductionId);
         if (query.From.HasValue) items = items.Where(item => item.Date >= query.From.Value);
         if (query.To.HasValue) items = items.Where(item => item.Date <= query.To.Value);
+        if (query.Payment == "paid") items = items.Where(item => item.Paid && !item.Donated);
+        if (query.Payment == "pending") items = items.Where(item => !item.Paid && !item.Donated);
+        if (query.Payment == "donated") items = items.Where(item => item.Donated);
         return items;
     }
 
@@ -421,6 +424,48 @@ public sealed class QueryRepository(AppDbContext context) : IQueryRepository
             new(production?.Count ?? 0, production?.Sold ?? 0, production?.Losses ?? 0,
                 production?.RemainingRevenue ?? 0, production?.RemainingCost ?? 0, production?.ExpectedRevenue ?? 0,
                 production?.ReferenceRevenue ?? 0, (production?.ReferenceRevenue ?? 0) - (production?.Cost ?? 0)));
+    }
+
+    public async Task<SalesReportDto> SalesReportAsync(string userId, PageQueryDto query, CancellationToken ct)
+    {
+        var all = FilterSales(userId, query with { Search = null, Payment = null });
+        var purchases = all.Where(item => !item.Donated);
+        var totals = await all.GroupBy(item => 1).Select(group => new SalesReportTotalsDto(
+            group.Count(item => !item.Donated),
+            group.Sum(item => item.Donated ? 0 : item.Packages),
+            group.Sum(item => item.Donated ? item.Packages : 0),
+            group.Count(item => !item.Donated && !item.Paid),
+            0,
+            group.Sum(item => item.Donated ? 0 : (double)item.PricePerPackage * item.Packages),
+            group.Sum(item => !item.Donated && item.Paid ? (double)item.PricePerPackage * item.Packages : 0),
+            group.Sum(item => !item.Donated && !item.Paid ? (double)item.PricePerPackage * item.Packages : 0),
+            group.Sum(item => item.Donated ? 0 : (double)item.CostPerPackage * item.Packages),
+            group.Sum(item => item.Donated ? (double)item.CostPerPackage * item.Packages : 0)))
+            .SingleOrDefaultAsync(ct) ?? new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var customers = await purchases.Where(item => item.Customer.Trim() != "")
+            .Select(item => item.Customer.Trim().ToUpper()).Distinct().CountAsync(ct);
+        var daily = await PageAsync(purchases.GroupBy(item => item.Date).OrderBy(group => group.Key)
+            .Select(group => new SalesReportDayDto(group.Key, group.Sum(item => item.Packages),
+                group.Sum(item => (double)item.PricePerPackage * item.Packages))), query, ct);
+        var products = await purchases.GroupBy(item => item.RecipeName)
+            .Select(group => new
+            {
+                Name = group.Key, Packages = group.Sum(item => item.Packages),
+                Revenue = group.Sum(item => (double)item.PricePerPackage * item.Packages),
+                Cost = group.Sum(item => (double)item.CostPerPackage * item.Packages),
+            })
+            .OrderByDescending(item => item.Revenue).ThenByDescending(item => item.Packages).ThenBy(item => item.Name)
+            .Take(5).Select(item => new SalesProductDto(item.Name, item.Packages, item.Revenue, item.Cost)).ToListAsync(ct);
+        var buyers = await purchases.GroupBy(item => item.Customer.Trim().ToUpper())
+            .Select(group => new
+            {
+                Customer = group.Min(item => item.Customer.Trim())!,
+                Packages = group.Sum(item => item.Packages),
+                Spent = group.Sum(item => (double)item.PricePerPackage * item.Packages),
+            })
+            .OrderByDescending(item => item.Spent).ThenByDescending(item => item.Packages).ThenBy(item => item.Customer)
+            .Take(5).Select(item => new ProductionBuyerDto(item.Customer, item.Packages, item.Spent)).ToListAsync(ct);
+        return new(totals with { Customers = customers }, daily, products, buyers);
     }
 
     public async Task<ProductionReportDto?> ReportAsync(string userId, string id, PageQueryDto query, CancellationToken ct)

@@ -31,6 +31,11 @@ public sealed class QueryController(IQueryService service) : ControllerBase, IQu
     public async Task<ActionResult<PageDto<SaleDto>>> Sales([FromQuery] PageQueryDto query, CancellationToken ct) =>
         Ok(await service.SalesAsync(query, ct));
 
+    [HttpGet("sales-report")]
+    [EndpointSummary("Indicadores de todas as vendas do período, rankings e evolução diária paginada.")]
+    public async Task<ActionResult<SalesReportDto>> SalesReport([FromQuery] PageQueryDto query, CancellationToken ct) =>
+        Ok(await service.SalesReportAsync(query, ct));
+
     [HttpGet("stock")]
     [EndpointSummary("Consulta pacotes paginados e metadados da compra completa.")]
     public async Task<ActionResult<PageDto<StockLotDto>>> Stock([FromQuery] PageQueryDto query, CancellationToken ct) =>

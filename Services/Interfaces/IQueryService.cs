@@ -8,6 +8,7 @@ public interface IQueryService
     Task<PageDto<RecipeDto>> RecipesAsync(PageQueryDto query, CancellationToken ct);
     Task<PageDto<ProductionDto>> ProductionsAsync(PageQueryDto query, CancellationToken ct);
     Task<PageDto<SaleDto>> SalesAsync(PageQueryDto query, CancellationToken ct);
+    Task<SalesReportDto> SalesReportAsync(PageQueryDto query, CancellationToken ct);
     Task<PageDto<StockLotDto>> StockAsync(PageQueryDto query, CancellationToken ct);
     Task<PageDto<ProductionBalanceDto>> BalancesAsync(PageQueryDto query, CancellationToken ct);
     Task<PageDto<StockTotalDto>> StockTotalsAsync(PageQueryDto query, CancellationToken ct);

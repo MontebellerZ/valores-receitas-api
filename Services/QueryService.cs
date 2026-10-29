@@ -10,6 +10,7 @@ public sealed class QueryService(IQueryRepository repository, ICurrentUserServic
     public Task<PageDto<RecipeDto>> RecipesAsync(PageQueryDto query, CancellationToken ct) => repository.RecipesAsync(currentUser.Id, query, ct);
     public Task<PageDto<ProductionDto>> ProductionsAsync(PageQueryDto query, CancellationToken ct) => repository.ProductionsAsync(currentUser.Id, query, ct);
     public Task<PageDto<SaleDto>> SalesAsync(PageQueryDto query, CancellationToken ct) => repository.SalesAsync(currentUser.Id, query, ct);
+    public Task<SalesReportDto> SalesReportAsync(PageQueryDto query, CancellationToken ct) => repository.SalesReportAsync(currentUser.Id, query, ct);
     public Task<PageDto<StockLotDto>> StockAsync(PageQueryDto query, CancellationToken ct) => repository.StockAsync(currentUser.Id, query, ct);
     public Task<PageDto<ProductionBalanceDto>> BalancesAsync(PageQueryDto query, CancellationToken ct) => repository.BalancesAsync(currentUser.Id, query, ct);
     public Task<PageDto<StockTotalDto>> StockTotalsAsync(PageQueryDto query, CancellationToken ct) => repository.StockTotalsAsync(currentUser.Id, query, ct);

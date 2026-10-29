@@ -24,6 +24,8 @@ public sealed record PageQueryDto : IValidatableObject
     public long? EntryOrder { get; init; }
     public DateOnly? From { get; init; }
     public DateOnly? To { get; init; }
+    [RegularExpression("^(paid|pending|donated)$")]
+    public string? Payment { get; init; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {

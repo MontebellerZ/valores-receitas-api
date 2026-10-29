@@ -55,6 +55,8 @@ Os modulos de insumos, estoque, receitas, ingredientes, producoes e vendas possu
 - `DELETE /api/stock/{id}?revision={revision}`: exclui logicamente um pacote sem consumo de produção e retorna HTTP 200 com `{revision}`. A revisão avança uma unidade na mesma transação; não é necessário recarregar o workspace completo. Revisão obsoleta retorna 409; IDs inexistentes ou de outro usuário retornam 404. Não altera outros pacotes da compra.
 - `GET /api/productions/{id}/consumptions`: lista lotes usados, quantidades e custos historicos.
 - `GET /api/query/productions/{id}/report`: inclui `topBuyers` com até cinco compradores (`customer`, `packages`, `spent`) de todas as vendas da produção, sem depender da página diária. Exclui doações, inclui vendas não pagas e agrupa nomes sem distinguir caixa ou espaços nas pontas. Ordena por pacotes e gasto decrescentes, com desempate pelo nome.
+- `GET /api/query/sales-report?from=2026-10-01&to=2026-10-31&productionId=...`: indicadores completos das vendas do usuário no período inclusivo e na produção opcional. Retorna `totals` (vendas, pacotes vendidos/doações, clientes identificados, faturamento, recebido, pendente e custos separados), `daily` (página de dias com vendas em ordem cronológica), `topProducts` e `topBuyers` (até cinco, por faturamento/valor comprado decrescente). Totais e rankings independem da página diária. Doações não entram em vendas, ticket, faturamento ou rankings; seu custo é informado à parte. Clientes são agrupados ignorando caixa e espaços nas pontas; nomes vazios não entram na contagem de identificados. `search` e `payment` são ignorados neste relatório, pois são filtros exclusivos do histórico.
+- `GET /api/query/sales` aceita também `payment=paid|pending|donated`; recebidos e pendentes excluem doações. Esse filtro é aplicado antes da paginação e da ordenação.
 - `GET /api/recipes`: consulta receitas com seus ingredientes.
 - `GET /api/recipes/{recipeId}/ingredients`: consulta os ingredientes de uma receita do usuario autenticado.
 - `GET /api/productions`: consulta o historico de producoes do usuario autenticado.
@@ -104,10 +106,12 @@ Para validar a interface sem alterar o banco da aplicação, `BrowserFixtureTest
 
 ```powershell
 $env:VALORES_BROWSER_FIXTURE = "1"
-dotnet test Tests\ValoresReceitas.Api.Tests.csproj --filter FullyQualifiedName~BrowserFixtureTests --logger "console;verbosity=detailed"
+dotnet test Tests\ValoresReceitas.Api.Tests.csproj --filter FullyQualifiedName~ValoresReceitas.Api.Tests.BrowserFixtureTests --logger "console;verbosity=detailed"
 ```
 
 Inicie o front em `http://127.0.0.1:5187`, com `VITE_API_URL=http://127.0.0.1:5232/api`, e use a conta de teste `pagination@example.test` / `Test-only.123`. O servidor dura no máximo 10 minutos; encerre-o ao terminar. Os dados são exclusivos dessa execução e desaparecem ao encerrá-la. Os testes normais não iniciam esse servidor.
+
+Para validar especificamente o painel de vendas, use `VALORES_BROWSER_FIXTURE=1` com o filtro `FullyQualifiedName~SalesBrowserFixtureTests`. Essa fixture usa a porta **5238**, sem interromper a API principal, e semeia três produtos e 90 dias de vendas, pagamentos pendentes e doações. No front temporário em `127.0.0.1:5187`, defina `VITE_API_URL=http://127.0.0.1:5238/api`. A conta é `sales-dashboard@example.test` / `Test-only.123`. Também dura até 10 minutos e descarta os dados ao encerrar. Se a API principal estiver aberta no depurador, compile os testes com um `BaseOutputPath` separado dentro de `bin` para não disputar os assemblies em uso.
 
 ## Estoque e custo FIFO
 

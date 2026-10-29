@@ -27,6 +27,10 @@ public sealed class SqlServerQueryTests
         Assert.True((await repository.RecipesAsync(userId, query, default)).Items.Count <= 25);
         Assert.True((await repository.ProductionsAsync(userId, query, default)).Items.Count <= 25);
         Assert.True((await repository.SalesAsync(userId, query, default)).Items.Count <= 25);
+        var salesReport = await repository.SalesReportAsync(userId, query, default);
+        Assert.True(salesReport.Daily.Items.Count <= 25);
+        Assert.True(salesReport.TopProducts.Count <= 5);
+        Assert.True(salesReport.TopBuyers.Count <= 5);
         Assert.True((await repository.StockAsync(userId, query, default)).Items.Count <= 25);
         Assert.True((await repository.StockTotalsAsync(userId, query, default)).Items.Count <= 25);
         Assert.True((await repository.BalancesAsync(userId, query, default)).Items.Count <= 25);

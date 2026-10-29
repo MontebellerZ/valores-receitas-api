@@ -19,12 +19,12 @@ using Xunit;
 
 namespace ValoresReceitas.Api.Tests;
 
-internal sealed class ApiTestHost(WebApplication app, SqliteConnection connection, bool browser = false) : IAsyncDisposable
+internal sealed class ApiTestHost(WebApplication app, SqliteConnection connection, bool browser = false, int browserPort = 5232) : IAsyncDisposable
 {
     public const string Password = "Test-only.123";
     public TestEmailSender EmailSender => app.Services.GetRequiredService<TestEmailSender>();
 
-    public static async Task<ApiTestHost> CreateAsync(bool browser = false)
+    public static async Task<ApiTestHost> CreateAsync(bool browser = false, int browserPort = 5232)
     {
         var connection = new SqliteConnection(browser
             ? $"Data Source=BrowserFixture_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
@@ -32,7 +32,7 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
         await connection.OpenAsync();
         var builder = WebApplication.CreateBuilder();
         if (browser)
-            builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:5232");
+            builder.WebHost.UseKestrel().UseUrls($"http://127.0.0.1:{browserPort}");
         else
             builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
@@ -80,11 +80,11 @@ internal sealed class ApiTestHost(WebApplication app, SqliteConnection connectio
             await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreatedAsync();
         }
         await app.StartAsync();
-        return new ApiTestHost(app, connection, browser);
+        return new ApiTestHost(app, connection, browser, browserPort);
     }
 
     public HttpClient CreateClient() => browser
-        ? new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = new Uri("http://127.0.0.1:5232") }
+        ? new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = new Uri($"http://127.0.0.1:{browserPort}") }
         : app.GetTestClient();
 
     public async Task<HttpClient> CreateUserAsync(string email, bool confirmed = true)

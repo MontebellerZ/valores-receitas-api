@@ -9,6 +9,7 @@ public interface IQueryController
     Task<ActionResult<PageDto<RecipeDto>>> Recipes(PageQueryDto query, CancellationToken ct);
     Task<ActionResult<PageDto<ProductionDto>>> Productions(PageQueryDto query, CancellationToken ct);
     Task<ActionResult<PageDto<SaleDto>>> Sales(PageQueryDto query, CancellationToken ct);
+    Task<ActionResult<SalesReportDto>> SalesReport(PageQueryDto query, CancellationToken ct);
     Task<ActionResult<PageDto<StockLotDto>>> Stock(PageQueryDto query, CancellationToken ct);
     Task<ActionResult<PageDto<ProductionBalanceDto>>> Balances(PageQueryDto query, CancellationToken ct);
     Task<ActionResult<PageDto<StockTotalDto>>> StockTotals(PageQueryDto query, CancellationToken ct);
