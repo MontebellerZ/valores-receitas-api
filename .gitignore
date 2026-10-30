@@ -6,3 +6,4 @@ appsettings.*.json
 *.user
 *.suo
 .vs/
+.vscode
